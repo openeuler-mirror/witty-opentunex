@@ -26,15 +26,6 @@ flowchart LR
 ```sh
 # 安装系统性能分析工具
 yum install -y sysstat util-linux iproute bc numactl ethtool iotop strace perf net-tools
-
-# 安装性能基准测试工具
-yum install -y sysbench fio iperf3
-
-# 安装数据库客户端
-yum install -y mysql postgresql redis
-
-# 安装文件系统工具
-yum install -y e2fsprogs xfsprogs btrfs-progs
 ```
 
 ---
@@ -46,18 +37,29 @@ yum install -y e2fsprogs xfsprogs btrfs-progs
 yum install nodejs
 npm install -g opencode-ai
 ```
-参考：https://opencode.ai/docs/zh-cn/
+opencode安装&使用参考文档：https://opencode.ai/docs/zh-cn/
+
+注1：opencode 需要 TUI 环境运行，推荐 vscode terminal 或 Win11 Terminal 终端下 SSH 连接到 Agent 机器上运行。
+
+注2：opencode 需要配置 LLM 提供商，配置方法参考：https://opencode.ai/docs/zh-cn/models/#%E6%8F%90%E4%BE%9B%E5%95%86
+
+注3：调优skills推荐使用 GLM-4.7 或 Minimax-M2.7 以上能力的模型，购买链接：
+- glm：https://bigmodel.cn/glm-coding
+- minimax：https://platform.minimaxi.com/subscribe/token-plan
 
 安装调优skills:
 ```sh
 mkdir -p ~/.config/opencode/skills/
-cp skills/* ~/.config/opencode/skills/
+cp -r skills/* ~/.config/opencode/skills/
 # 或创建软链接
 # cd skills && for skill in *; do ln -s ~/.config/opencode/skills/${skill} $(pwd)/${skill}; done
 ```
 
 在 Agent 侧启动 opencode 调优：
+
 ```sh
+# 提供一个独立空间，可用于存放报告
+mkdir -p agentspace
 cd agentspace/
 opencode
 ```
@@ -68,7 +70,7 @@ opencode
 
 2、输入：帮我分析xx.xx.xx.xx机器上xx负载场景的性能瓶颈/帮我优化xx.xx.xx.xx机器上xx负载场景的性能
 
-3、根据提示信息，输入用户名密码，为目标调优机器建立 SSH 无密码连接，同意提示需要的权限
+3、提前建立目标机器的 SSH 无密码连接，或根据对话提示，输入机器连接信息，将自动为目标调优机器建立 SSH 无密码连接，对话过程中同意需要的相关权限
 
 4、运行待优化场景的benchmark负载（当前需手动反复运行benchmark保持到分析结束）
 
