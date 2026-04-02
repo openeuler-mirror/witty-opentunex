@@ -1,6 +1,6 @@
 ---
 name: top-down-bottleneck
-description: Top-down OS-level bottleneck analysis: comprehensive system collection, three-level bottleneck analysis (global, process, microarchitecture). Use when diagnosing OS-level performance issues, identifying high-pressure processes, mapping resource dependencies, or analyzing OS-level resource bottlenecks. This skill does NOT analyze application-layer data (e.g., MySQL query plans, Java heap, Redis commands). Supports iterative refinement until sufficient analysis is achieved.
+description: Top-down OS-level bottleneck analysis, includes comprehensive system collection, and three-level bottleneck analysis (global, process, microarchitecture). Use when diagnosing OS-level performance issues, identifying high-pressure processes, mapping resource dependencies, or analyzing OS-level resource bottlenecks. This skill does NOT analyze application-layer data (e.g., MySQL query plans, Java heap, Redis commands). Supports iterative refinement until sufficient analysis is achieved.
 ---
 
 # top-down-bottleneck — Top-Down System Bottleneck Analysis
