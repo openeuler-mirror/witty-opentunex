@@ -52,7 +52,7 @@ opencode安装&使用参考文档：https://opencode.ai/docs/zh-cn/
 mkdir -p ~/.config/opencode/skills/
 cp -r skills/* ~/.config/opencode/skills/
 # 或创建软链接
-# cd skills && for skill in *; do ln -s ~/.config/opencode/skills/${skill} $(pwd)/${skill}; done
+# for skill in skills/*; do ln -s $(pwd)/${skill} ~/.config/opencode/skills/; done
 ```
 
 在 Agent 侧启动 opencode 调优：
