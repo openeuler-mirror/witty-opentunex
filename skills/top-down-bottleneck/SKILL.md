@@ -15,9 +15,9 @@ The skill supports iterative refinement until sufficient analysis is achieved.
 
 ## Client Connection and Command Execution
 
-Load the remote-execution skill for standardized SSH connection and command execution:
+[1] if current <agent> is not opentunex-assistant, Load the `remote-execution` skill for standardized SSH connection and command execution.
 
-skill:remote-execution
+[2] if current <agent> is opentunex-assistant, Keep the following rule for command execution:  **IMPORTANT** Always output commands which need execution to the **USER**, and ask **USER** for execution results, never execute command automatically by <agent> yourself.
 
 ---
 
