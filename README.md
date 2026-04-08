@@ -41,7 +41,7 @@ opencode安装&使用参考文档：https://opencode.ai/docs/zh-cn/
 
 注1：opencode 需要 TUI 环境运行，推荐 vscode terminal 或 Win11 Terminal 终端下 SSH 连接到 Agent 机器上运行。
 
-注2：opencode 需要配置 LLM 提供商，配置方法参考：https://opencode.ai/docs/zh-cn/models/#%E6%8F%90%E4%BE%9B%E5%95%86
+注2：opencode 需要配置 LLM 提供商，推荐外网环境配置，配置方法参考：https://opencode.ai/docs/zh-cn/models/#%E6%8F%90%E4%BE%9B%E5%95%86
 
 注3：调优skills推荐使用 GLM-4.7 或 Minimax-M2.7 以上能力的模型，购买链接：
 - glm：https://bigmodel.cn/glm-coding
@@ -64,7 +64,11 @@ cd agentspace/
 opencode
 ```
 
-开始性能分析/调优：
+## 全自动化模式性能诊断
+
+适用场景：自有环境可连接LLM api，可直接SSH连接到调优环境。
+
+性能瓶颈分析/调优步骤：
 
 1、输入：`/skills` 选择 top-down-bottleneck 瓶颈分析或 os-performance-optimization 性能优化skill
 
@@ -76,4 +80,20 @@ opencode
 
 5、等待opentunex 调优Agent进行自动化分析，报告输出瓶颈分析结果/优化建议。
 
+## 半自动化模式性能诊断
 
+适用场景：调优环境隔离，无法部署Agent进行SSH连接和LLM api接入，仅可手动采集数据后、经客户同意传回到本地机器后做分析。
+
+性能瓶颈分析/调优步骤：
+
+1、使用TAB键切换agent：选择 opentunex-assistant agent
+
+2、输入：帮我分析XX负载环境上的OS性能瓶颈/帮我优化XX负载环境上的性能
+
+3、Agent加载需要的相关skill，输出下一步需执行的采集脚本
+
+4、脚本复制到客户环境执行（需保证benchmark负载执行中），执行结果通过飞书等软件传回本地机器
+
+5、执行结果回复给opentunex-assistant agent
+
+6、等待opentunex-assistant agent进行自动化分析，给出瓶颈分析结果/优化建议，或继续迭代进行下一步采集。

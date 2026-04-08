@@ -44,13 +44,14 @@ Identify bottleneck characteristics across CPU, memory, I/O, and network. Use sp
 **CPU Bottleneck Indicators**:
 ```bash
 # CPU utilization breakdown
-mpstat -P ALL 1 5
+mpstat -P ALL 1 5 | grep 'Average'
 # Key indicators: %user > 80%, %iowait > 20%, %steal > 10%, %soft > 10%
 # Load average vs CPU count
 cat /proc/loadavg
 # Context switches and interrupts
-vmstat 1 5 | awk '{print $12, $13}'
-pidstat -w 1 5
+vmstat 1 5 | awk 'NR>1 {print $12, $13}'
+# top 50 context switch tasks
+pidstat -w 1 5 | awk '/Average/ && !/UID/ && NF>=6 {total=$4+$5; print total, $0}' | sort -k1 -rn | head -50 | cut -d' ' -f2-
 # Key indicators: cs/s > 50000, in/s > 10000 indicate scheduling pressure
 ```
 
@@ -60,7 +61,7 @@ pidstat -w 1 5
 free -h
 cat /proc/meminfo | grep -E "SwapTotal|SwapFree|SwapCached|CommitLimit|Committed_AS"
 # Page faults
-pidstat -r 1 5
+pidstat -r 1 5 | grep 'Average'
 # Key indicators: majflt/s > 1000 indicates swap thrashing
 # Slab memory usage
 cat /proc/meminfo | grep -E "Slab|SReclaimable|SUnreclaim"
@@ -82,11 +83,11 @@ pidstat -d 1 5
 **Network Bottleneck Indicators**:
 ```bash
 # Network interface stats
-sar -n DEV 1 5
-sar -n EDEV 1 5
+sar -n DEV 1 5 | grep 'Average'
+sar -n EDEV 1 5 | grep 'Average'
 # Key indicators: rxerr/s > 10, txerr/s > 10, collisions/s > 5
 # TCP retransmissions and drops
-nstat -az | grep -E "TcpRetransSegs|TcpExtTCPLostRetransmit|TcpExtListenOverflows|TcpExtListenDrops"
+nstat -az | grep -E "TcpOutSegs|TcpRetransSegs|TcpExtTCPLostRetransmit|TcpExtListenOverflows|TcpExtListenDrops"
 # Key indicators: high retransmission rate, listen drops indicate connection pressure
 # Connection backlog
 ss -tan state time-wait | wc -l
@@ -106,7 +107,6 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 ```bash
 # Top CPU processes
 ps aux --sort=-%cpu | head -20
-pidstat -u 1 5 | awk 'NR<=3 || $8>10'
 # Top memory processes
 ps aux --sort=-%mem | head -20
 # Top I/O processes
@@ -119,14 +119,14 @@ pidstat -d 1 5 | awk 'NR<=3 || $6>1000 || $7>1000'
 **Important**: use `remote-execution` skill for remote perf command.
 
 ```bash
-# Record performance data for target process (60 seconds)
-perf record -p <PID> -g -- sleep 60
+# Record performance data for target process (30 seconds)
+perf record -p <PID> -g -- sleep 30
 # Analyze recorded data
 perf report
 # Real-time sampling
 perf top -p <PID>
 # Generate flamegraph (if flamegraph tools available)
-perf record -F 99 -p <PID> -g -- sleep 60
+perf record -F 99 -p <PID> -g -- sleep 30
 perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg
 ```
 
