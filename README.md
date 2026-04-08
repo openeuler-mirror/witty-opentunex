@@ -55,6 +55,13 @@ cp -r skills/* ~/.config/opencode/skills/
 # for skill in skills/*; do ln -s $(pwd)/${skill} ~/.config/opencode/skills/; done
 ```
 
+安装 opentunex-assistant agent：
+
+```BASH
+mkdir -p ~/.config/opencode/agents/
+cp agents/opentunex-assistant.md ~/.config/opencode/agents/
+```
+
 在 Agent 侧启动 opencode 调优：
 
 ```sh
