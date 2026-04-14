@@ -9,15 +9,20 @@ This skill provides standardized client connection and command execution capabil
 
 ---
 
-## Client Connection and Command Execution
+## Client Connection Setup
 
 **CRITICAL**: Before all phases, check client connection. The client IP is provided in the user context (e.g., "analyze lock bottleneck on 192.168.1.100"). Extract the IP from user input, do NOT ask user again for IP.
 
-**Check for client connection**:
+**setup client connection**:
 1. Extract client IP from user context (e.g., from "192.168.1.100" or "root@192.168.1.100" in user input)
-2. Test passwordless SSH connection with extracted IP, if successful, continue;
-3. If passwordless SSH connection failed, read client auth info (username, password, port) corresponding to the IP in `/opt/opentunex/config/client.yaml`, if not found, ask user to provide auth info and **save it** to `/opt/opentunex/config/client.yaml`;
-4. Test if SSH connection works with the given auth info, if connection fails, ask user to provide correct info until SSH connection succeeds, then add local machine's public key to the client to ensure passwordless connection.
+2. Test passwordless SSH connection with extracted IP, if successful, setup done;
+3. setup passwordless SSH connection
+    3.1 read client auth info (username, password, port) corresponding to the IP in `/opt/opentunex/config/client.yaml`
+      - if found, test if SSH connection works with the given auth info
+      - if not found or connection test fails, ask user to provide correct auth info, and append auth info to `/opt/opentunex/config/client.yaml`
+    3.2 add local machine's public key to the client to ensure passwordless connection.
+
+## Remote Command Execution Guide
 
 **Command execution**: all commands for client should be executed via `ssh`, considering the limits of ssh, allow converting commands to bash script and scp to client and execute if needed. Use `ssh -q -tt` to remove useless banner.
 **CRITICAL**: Must use `ssh -tt` to run command or script: pseudo-terminal is required for perf operation, `ssh -tt` provides such environment and ensures terminal control characters are properly handled. NEVER copy client data to local machine for analysis.
@@ -26,7 +31,7 @@ This skill provides standardized client connection and command execution capabil
 **Example implementation**:
 ```bash
 # Check client connection
-ssh ${username}@${ip} echo 'test client connection'
+ssh -o ConnectTimeout=5 ${username}@${ip} echo 'test client connection'
 
 # Execute simple command in client machine
 ssh -q -tt ${username}@${ip} 'uname -r'
@@ -66,56 +71,6 @@ skill:remote-execution
 ```
 
 This replaces the duplicated Client Connection and Command Execution section in each skill.
-
----
-
-## Supporting Scripts
-
-### scripts/check_client_connection.sh
-
-A helper script to verify client connectivity:
-
-```bash
-#!/bin/bash
-# Check client connection helper script
-# Usage: check_client_connection.sh <user@host>
-
-REMOTE_HOST=${1:-}
-
-if [ -z "$REMOTE_HOST" ]; then
-  echo "Usage: $0 <user@host>"
-  exit 1
-fi
-
-echo "Checking connection to $REMOTE_HOST..."
-if ssh -o ConnectTimeout=5 -o BatchMode=yes "$REMOTE_HOST" echo 'OK'; then
-  echo "Connection successful"
-  exit 0
-else
-  echo "Connection failed"
-  exit 1
-fi
-```
-
-### scripts/execute_remote.sh
-
-A helper script to execute commands on remote client:
-
-```bash
-#!/bin/bash
-# Execute commands on remote client
-# Usage: execute_remote.sh <user@host> <command>
-
-REMOTE_HOST=${1:-}
-COMMAND=${2:-}
-
-if [ -z "$REMOTE_HOST" ] || [ -z "$COMMAND" ]; then
-  echo "Usage: $0 <user@host> <command>"
-  exit 1
-fi
-
-ssh -q -tt "$REMOTE_HOST" '$COMMAND'
-```
 
 ---
 
