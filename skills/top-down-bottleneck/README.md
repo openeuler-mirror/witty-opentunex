@@ -1,16 +1,18 @@
 # top-down-bottleneck
 
-自上而下系统瓶颈分析Skill，通过系统级数据收集和多层分析识别CPU、内存、IO、网络等瓶颈。
+自上而下系统瓶颈分析Skill，通过系统环境静态信息采集、动态指标收集和多层分析识别CPU、内存、IO、网络等瓶颈。
 
 ## 总体功能
 
 提供系统级瓶颈分析，主要功能包括：
 
-1. **系统信息收集** - 快速收集CPU、内存、磁盘、网络指标
+1. **系统环境静态信息采集** - 采集硬件规格、软件版本、内核启动参数
 2. **全局瓶颈识别** - 识别系统级资源瓶颈
 3. **进程级分析** - 识别高压力进程
-4. **微架构分析** - CPU微架构层面分析
-5. **迭代优化** - 支持反复分析直到定位问题
+4. **热点函数与系统调用分析** - perf热点函数和strace系统调用分析
+5. **微架构分析** - CPU微架构层面分析
+6. **基于证据的瓶颈分析** - 证据汇总、严重程度映射、优化建议
+7. **迭代优化** - 支持反复分析直到定位问题
 
 **Scope**: 仅分析OS级别资源，不包含应用层数据
 
@@ -27,6 +29,8 @@
 - `sar` (sysstat包)
 - `perf` (linux-tools-common)
 - `numactl`, `lscpu`
+- `strace`
+- `dmidecode` (硬件信息，需root)
 
 ## 用法
 
@@ -47,24 +51,35 @@
 ### 执行流程
 
 ```
-Phase 1: 系统信息收集
-    ├→ sys-sniffer后台收集
-    └→ CPU/Memory/Disk/Network/内核信息
+Phase 1: 系统环境静态信息采集
+    ├→ 硬件规格: CPU/内存/磁盘/网卡型号
+    ├→ 软件版本: OS/内核/工具版本
+    └→ 内核启动参数: cmdline/sysctl/模块/调度器
 
-Phase 2: 瓶颈分析
+Phase 2: 主负载识别与瓶颈分析
     ├→ Step 2.1: 全局资源分析
     │   ├→ CPU瓶颈指标
     │   ├→ 内存瓶颈指标
     │   ├→ IO瓶颈指标
     │   └→ 网络瓶颈指标
     │
-    ├→ Step 2.2: 进程级分析
-    │   ├→ 高CPU进程
-    │   ├→ 高内存进程
-    │   └→ 高IO进程
-    │
-    └→ Step 2.3: 微架构分析 (可选)
-        └→ CPI, IPC, 缓存命中率
+    └→ Step 2.2: 进程级分析
+        ├→ 高CPU进程
+        ├→ 高内存进程
+        └→ 高IO进程
+
+Phase 3: 热点函数与系统调用分析
+    ├→ Step 3.1: 热点函数分析 (perf)
+    └→ Step 3.2: 系统调用分析 (strace)
+
+Phase 4: 微架构瓶颈分析
+    └→ PMU events: cache/branch/pipeline/NUMA
+
+Phase 5: 基于证据的瓶颈分析
+    ├→ 拓扑分析
+    ├→ 瓶颈映射与严重程度
+    ├→ 最终瓶颈汇总
+    └→ OS级优化建议
 ```
 
 ### 输出示例
@@ -72,12 +87,15 @@ Phase 2: 瓶颈分析
 ```markdown
 ## 系统瓶颈分析报告
 
-### 系统概览
+### 系统环境静态信息
 - Hostname: server01
 - Kernel: 5.4.0-generic
-- CPU: 16 cores (2 sockets)
-- Memory: 64GB
-- Uptime: 15 days
+- CPU: Intel Xeon E5-2680 v4, 2 sockets, 14 cores/socket, 28 threads
+- Memory: 64GB DDR4 2400MHz
+- Disk: sda 500GB SSD (mq-deadline), sdb 2TB HDD (mq-deadline)
+- NIC: Intel X710 (driver: i40e)
+- OS: openEuler 24.03
+- Boot params: quiet splash
 
 ### 瓶颈汇总
 
@@ -113,18 +131,26 @@ Phase 2: 瓶颈分析
 
 | 输出件 | 路径 | 说明 |
 |--------|------|------|
-| 系统信息 | /tmp/system_info.txt | 原始系统数据 |
+| 静态系统信息 | Skill输出 | 硬件规格/软件版本/内核参数 |
 | CPU分析 | Skill输出 | CPU瓶颈报告 |
 | 内存分析 | Skill输出 | 内存瓶颈报告 |
 | IO分析 | Skill输出 | IO瓶颈报告 |
 | 网络分析 | Skill输出 | 网络瓶颈报告 |
 | 进程分析 | Skill输出 | 高压力进程列表 |
+| 热点分析 | Skill输出 | perf热点函数报告 |
+| 系统调用分析 | Skill输出 | strace系统调用报告 |
+| 微架构分析 | Skill输出 | PMU事件分析报告 |
 
 ## 参考文档
 
+- Phase 1 硬件规格: lscpu, dmidecode, lsblk, lspci
+- Phase 1 软件版本: os-release, uname, tool -V
+- Phase 1 内核启动参数: /proc/cmdline, sysctl, lsmod
 - Phase 2.1 CPU瓶颈指标: mpstat, pidstat, vmstat
 - Phase 2.1 内存瓶颈指标: free, vmstat, pidstat
 - Phase 2.1 IO瓶颈指标: iostat, pidstat
 - Phase 2.1 网络瓶颈指标: sar, ss, netstat
 - Phase 2.2 进程级分析: pidstat, top
-- Phase 2.3 微架构: perf stat
+- Phase 3.1 热点函数: perf record, perf report, perf top
+- Phase 3.2 系统调用: strace, perf trace
+- Phase 4 微架构: perf stat, toplev

@@ -1,32 +1,10 @@
 # Remote Execution Guide
 
-This guide provides detailed information about remote execution patterns used across all skills.
+This guide provides guide about remote execution.
 
-## Connection Workflow
+## Handle Authentication Failure
 
-### Step 1: Extract Client IP from Context
-
-The client IP is provided in user input. Examples:
-- "analyze lock bottleneck on 192.168.1.100"
-- "check performance on root@192.168.1.100"
-- "benchmark 10.0.0.50"
-
-Extract the IP automatically, do NOT ask user for IP.
-
-### Step 2: Test Passwordless SSH
-
-```bash
-# Try direct connection with keys
-ssh -o ConnectTimeout=5 -o BatchMode=yes ${username}@${ip} echo 'OK'
-```
-
-If successful, proceed to command execution.
-
-### Step 3: Handle Authentication Failure
-
-If passwordless SSH fails:
-
-1. Read from `/opt/opentunex/config/client.yaml`:
+1. read auth info file from `/opt/opentunex/config/client.yaml`:
 ```yaml
 clients:
   192.168.1.100:
@@ -35,20 +13,27 @@ clients:
     port: 22
 ```
 
-2. If not found, ask user for credentials
+2. ask user for credentials
 
-3. Save to yaml file for future use
+## setup passwordless access
 
-4. Test SSH with password
+1. check ssh key
+```bash
+cat ~/.ssh/*.pub 2>/dev/null || echo "NO_KEY"
+```
 
-5. If successful, setup passwordless access:
+2. generate ssh key
+```bash
+ssh-keygen
+```
+
+3. copy ssh key to remote
 ```bash
 ssh-copy-id ${username}@${ip}
 ```
 
-### Step 4: Verify Connection
+4. Verify Connection
 
-Final verification:
 ```bash
 ssh ${username}@${ip} echo 'Connection verified'
 ```

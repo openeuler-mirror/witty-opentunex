@@ -5,9 +5,12 @@ description: Top-down OS-level bottleneck analysis, includes comprehensive syste
 
 # top-down-bottleneck — Top-Down System Bottleneck Analysis
 
-This skill performs a two-phase analysis:
-(1) fast, background system-wide information collection;
-(2) rigorous main-workload identification with evidence-based bottleneck analysis at multiple levels (global, process, microarchitecture).
+This skill performs a five-phase analysis:
+(1) system environment static information collection (hardware specs, software versions, kernel boot parameters);
+(2) global resource bottleneck identification and top resource-consuming process identification;
+(3) hotspot function and syscall analysis for top processes;
+(4) microarchitecture bottleneck analysis using PMU events;
+(5) evidence-based bottleneck analysis with severity mapping.
 The skill focuses exclusively on OS-level resource bottlenecks. It does NOT collect, analyze, or provide recommendations for application-layer data (database queries, JVM heap, application logs, etc.).
 The skill supports iterative refinement until sufficient analysis is achieved.
 
@@ -21,15 +24,13 @@ The skill supports iterative refinement until sufficient analysis is achieved.
 
 ---
 
-## Phase 1: System-Wide Information Collection
+## Phase 1: System Environment Static Information Collection
 
-**Objective**: Gather comprehensive raw system data.
+**Objective**: Gather static system environment information — hardware specifications, software versions, and kernel boot parameters. This phase collects **static** facts about the system, not dynamic runtime metrics.
 
-```
-task(subagent_type="sys-sniffer", load_skills=["basic-system-info"], description="Gather basic system info", prompt="Collect CPU, memory, disk, network, kernel, hardware.")
-```
+reference:basic-system-info
 
-**Output**: Raw data. Scope: CPU, memory, disk, network, kernel.
+**Output**: Static system profile: hardware specs (CPU model/core count/NUMA, memory size, disk types, NIC models), software versions (OS, kernel, tools), kernel boot parameters and key sysctl settings.
 
 ---
 
@@ -43,55 +44,71 @@ Identify bottleneck characteristics across CPU, memory, I/O, and network. Use sp
 
 **CPU Bottleneck Indicators**:
 ```bash
-# CPU utilization breakdown
-mpstat -P ALL 1 5 | grep 'Average'
-# Key indicators: %user > 80%, %iowait > 20%, %steal > 10%, %soft > 10%
+# CPU utilization per core (skip 100% idle cores, keep header + all + active)
+mpstat -P ALL 1 5 | grep 'Average' | awk 'NR==1 || $3=="all" || $NF != "100.00"'
+
 # Load average vs CPU count
 cat /proc/loadavg
-# Context switches and interrupts
-vmstat 1 5 | awk 'NR>1 {print $12, $13}'
-# top 50 context switch tasks
-pidstat -w 1 5 | awk '/Average/ && !/UID/ && NF>=6 {total=$4+$5; print total, $0}' | sort -k1 -rn | head -50 | cut -d' ' -f2-
-# Key indicators: cs/s > 50000, in/s > 10000 indicate scheduling pressure
+
+# Context switches and interrupts (skip since-boot sample, keep 5-second interval)
+vmstat 5 2 | awk 'NR<=2{print; next} NR==3{next} {print; exit}'
+
+# Top 30 context switch tasks (Sorted by cswch/s - header + top 30)
+{ echo "      UID       PID   cswch/s nvcswch/s  Command"; pidstat -w 1 5 | grep 'Average' | grep -v "UID" | sort -k4 -rn | head -30; }
+
+# Key indicators: %user > 80%, %iowait > 20%, %steal > 10%, %soft > 10%, cs/s > 50000, in/s > 10000
 ```
 
 **Memory Bottleneck Indicators**:
 ```bash
 # Swap usage and pressure
 free -h
+
+# Key swap metrics only
 cat /proc/meminfo | grep -E "SwapTotal|SwapFree|SwapCached|CommitLimit|Committed_AS"
-# Page faults
-pidstat -r 1 5 | grep 'Average'
+
+# Page faults - Top 20 by majflt/s (Sorted - header + top 20)
+{ echo "      UID       PID  minflt/s  majflt/s     VSZ     RSS   %MEM  Command"; pidstat -r 1 5 | grep 'Average' | grep -v "UID" | sort -k5 -rn | head -20; }
+
 # Key indicators: majflt/s > 1000 indicates swap thrashing
 # Slab memory usage
 cat /proc/meminfo | grep -E "Slab|SReclaimable|SUnreclaim"
+
 # Key indicators: Slab > 30% of total memory indicates kernel memory pressure
 ```
 
 **I/O Bottleneck Indicators**:
 ```bash
-# Disk utilization and wait time
-iostat -xz 1 5
-# Key indicators: %util > 90%, await > 20ms, svctm > 10ms
-# Queue depth
-cat /proc/diskstats | awk '{print $1, $12}'
-# IO pressure per process
-pidstat -d 1 5
-# Key indicators: read_kB/s > 100000, write_kB/s > 50000, %util > 80%
+# Disk utilization (skip since-boot, keep 5s interval sample, skip 0% util devices)
+iostat -xz 5 2 | awk '/^avg-cpu/{report++; if(report==2) print; next} /^Device/{if(report==2) print; next} /^$/{next} /Linux/{next} report==2 {if(/^[[:space:]]*[0-9]/){print; next} if(/^[a-z]/ && $NF+0>0){print; next}}'
+
+# Queue depth (inflight_IO is instantaneous, not cumulative)
+echo "major minor device inflight_IO" && cat /proc/diskstats | awk '{print $1, $2, $3, $12}'
+
+# Top 20 I/O processes by kB_wr/s (Sorted - header + top 20)
+{ echo "      UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s iodelay  Command"; pidstat -d 1 5 | grep 'Average' | grep -v "UID" | sort -k5 -rn | head -20; }
+
+# Key indicators: %util > 90%, await > 20ms, read_kB/s > 100000, write_kB/s > 50000
 ```
 
 **Network Bottleneck Indicators**:
 ```bash
-# Network interface stats
-sar -n DEV 1 5 | grep 'Average'
-sar -n EDEV 1 5 | grep 'Average'
-# Key indicators: rxerr/s > 10, txerr/s > 10, collisions/s > 5
-# TCP retransmissions and drops
-nstat -az | grep -E "TcpOutSegs|TcpRetransSegs|TcpExtTCPLostRetransmit|TcpExtListenOverflows|TcpExtListenDrops"
-# Key indicators: high retransmission rate, listen drops indicate connection pressure
+# Network interface stats (skip idle interfaces with zero rx/tx kB/s)
+sar -n DEV 1 5 | grep 'Average' | awk 'NR==1 || $5+0>0 || $6+0>0'
+
+# Network error stats (skip interfaces with all-zero errors)
+sar -n EDEV 1 5 | grep 'Average' | awk 'NR==1{print; next} {for(i=3;i<=NF;i++) if($i+0>0){print; next}}'
+
+# TCP retransmissions and drops (5-second two-snapshot delta, excludes since-boot accumulation)
+nstat -az | grep -E "^(TcpOutSegs|TcpRetransSegs|TcpExtTCPLostRetransmit|TcpExtListenOverflows|TcpExtListenDrops)" | awk '{print $1,$2}' > /tmp/nstat_before.txt && sleep 5 && nstat -az | grep -E "^(TcpOutSegs|TcpRetransSegs|TcpExtTCPLostRetransmit|TcpExtListenOverflows|TcpExtListenDrops)" | awk '{print $1,$2}' > /tmp/nstat_after.txt && echo "counter delta rate/s" && join /tmp/nstat_before.txt /tmp/nstat_after.txt | awk -v s=5 '{printf "%-40s %8d %8.1f\n", $1, $3-$2, ($3-$2)/s}'
+# Key indicators: retransmission rate > 2%, ListenDrops > 0
+
 # Connection backlog
-ss -tan state time-wait | wc -l
-ss -tn state established | awk '{print $4}' | awk -F: '{print $NF}' | sort | uniq -c | sort -rn | head -10
+echo "TIME_WAIT connections:" && ss -tan state time-wait | wc -l
+
+# Top 10 ports by established connections (Sorted - header + top 10)
+{ echo "count port"; ss -tn state established | awk '{print $4}' | awk -F: '{print $NF}' | sort | uniq -c | sort -rn | head -10; }
+
 # Key indicators: TIME_WAIT > 5000, established connections > 10000 per port
 ```
 
@@ -105,16 +122,24 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 **Process Identification**:
 ```bash
-# Top CPU processes
+# Top 20 CPU processes (Sorted - header preserved by ps)
 ps aux --sort=-%cpu | head -20
-# Top memory processes
+
+# Top 20 memory processes (Sorted - header preserved by ps)
 ps aux --sort=-%mem | head -20
-# Top I/O processes
-iotop -oP -b -n 5 -d 1
-pidstat -d 1 5 | awk 'NR<=3 || $6>1000 || $7>1000'
+
+# Top 20 I/O processes by iotop (requires root, 5-second sampling)
+{ echo "    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND"; iotop -oP -b -n 5 -d 1 | grep -E "^\s*[0-9]" | head -20; } || true
+
+# Top 20 I/O processes by pidstat (Sorted by kB_wr/s col 5 - header + top 20)
+{ echo "      UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s iodelay  Command"; pidstat -d 1 5 | grep 'Average' | grep -v "UID" | sort -k5 -rn | head -20; }
 ```
 
-### Step 2.3: Hotspot Function Analysis and syscall analysis
+---
+
+## Phase 3: Hotspot Function and Syscall Analysis
+
+### Step 3.1: Hotspot Function Analysis
 
 **Important**: use `remote-execution` skill for remote perf command.
 
@@ -125,12 +150,11 @@ perf record -p <PID> -g -- sleep 30
 perf report
 # Real-time sampling
 perf top -p <PID>
-# Generate flamegraph (if flamegraph tools available)
-perf record -F 99 -p <PID> -g -- sleep 30
-perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg
+# Generate flamegraph (requires flamegraph tools, tolerate if not installed)
+perf record -F 99 -p <PID> -g -- sleep 30 && perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg || true
 ```
 
-### Step 2.4: Hotspot Function Analysis and syscall analysis
+### Step 3.2: Syscall Analysis
 
 **Important**: use `remote-execution` skill for remote perf command.
 
@@ -156,51 +180,46 @@ perf trace -p <PID>
 - High context switch rate (cs/s > 50000 for single process)
 - Excessive system call frequency (> 10000 syscalls/sec)
 
-**Output**: For each top process, record: PID, name, top 5 hot functions, total CPU%, main system calls, identified bottlenecks with evidence. **Both Hot Function Analysis and System Call Analysis results MUST be included in the Phase 2 summary — they are not optional.**
+**Output**: For each top process, record: PID, name, top 5 hot functions, total CPU%, main system calls, identified bottlenecks with evidence. **Both Hot Function Analysis and System Call Analysis results MUST be included in the Phase 3 summary — they are not optional.**
 
 ---
 
-### Step 2.3: Microarchitecture Bottleneck Analysis
+## Phase 4: Microarchitecture Bottleneck Analysis
 
 Use PMU (Performance Monitoring Unit) events to identify cache, branch, and pipeline bottlenecks:
 
 **CPU Cache Analysis**:
 ```bash
-# Collect cache miss rates
+# Cache miss rates (portable across x86/ARM)
 perf stat -e cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses -p <PID> -- sleep 30
 # Key indicators: L1 miss rate > 10%, LLC miss rate > 20%
-# Detailed cache statistics
-perf stat -e cache-misses,cache-references,dTLB-load-misses,iTLB-load-misses -p <PID> -- sleep 30
+# TLB miss statistics (may not be available on all platforms, tolerate errors)
+perf stat -e dTLB-load-misses,iTLB-load-misses -p <PID> -- sleep 30 || true
 ```
 
-**Branch Prediction Analysis**:
+**Branch Prediction and Pipeline Analysis**:
 ```bash
-# Branch misprediction rate
-perf stat -e branches,branch-misses -p <PID> -- sleep 30
-# Key indicators: branch miss rate > 5% indicates poor branch prediction
+# Branch misprediction rate (branches may not be supported on all platforms)
+perf stat -e branches,branch-misses -p <PID> -- sleep 30 || true
 # Pipeline stall analysis
 perf stat -e stalled-cycles-frontend,stalled-cycles-backend,cycles,instructions -p <PID> -- sleep 30
-# Key indicators: frontend stalls > 30% cycles, backend stalls > 20% cycles
+# Key indicators: branch miss rate > 5%, frontend stalls > 30% cycles, backend stalls > 20% cycles
 ```
 
 **Top-Down Microarchitecture Analysis**:
 ```bash
-# Intel Top-Down Microarchitecture Analysis
-perf stat -e cycles,instructions,uops_executed,uops_retired -p <PID> -- sleep 30
-# Retiring metric (good)
-# Bad speculation metric
-# Frontend bound metric
-# Backend bound metric
-# Use pmu-tools if available
-toplev -p <PID> --sleep 30
+# Portable pipeline metrics (cycles, instructions available everywhere)
+perf stat -e cycles,instructions -p <PID> -- sleep 30
+# Intel-only uops metrics (tolerate error on non-Intel platforms)
+perf stat -e uops_executed,uops_retired -p <PID> -- sleep 30 || true
+# Intel pmu-tools Top-Down analysis (Intel-only, tolerate if not installed)
+toplev -p <PID> --sleep 30 || true
 ```
 
-**Memory Bandwidth and Latency**:
+**Memory Bandwidth and NUMA**:
 ```bash
-# Memory bandwidth utilization
-perf stat -e mem_loads,mem_stores,mem_load_retired.l3_miss -p <PID> -- sleep 30
-# NUMA-related metrics
-perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 30
+# NUMA-related metrics (may not exist on non-NUMA platforms, tolerate errors)
+perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 30 || true
 # Key indicators: remote/local > 2:1 indicates NUMA imbalance
 ```
 
@@ -213,9 +232,9 @@ perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 3
 
 ---
 
-### Step 2.4: Evidence-Based Bottleneck Analysis
+## Phase 5: Evidence-Based Bottleneck Analysis
 
-**Requirement**: Every bottleneck claim MUST be backed by specific evidence from Steps 2.1-2.3. No vague or speculative statements.
+**Requirement**: Every bottleneck claim MUST be backed by specific evidence from Phases 1-4. No vague or speculative statements.
 
 **Bottleneck categories and evidence mapping**:
 
@@ -245,10 +264,11 @@ perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 3
 4. **Low**: Suboptimal but not blocking (context switches elevated but acceptable)
 
 **Evidence collection checklist**:
-- [ ] Phase 1 system metrics (mpstat, iostat, pidstat)
-- [ ] Phase 2.1 global bottleneck identification
-- [ ] Phase 2.2 top process hot functions and call chains
-- [ ] Phase 2.3 microarchitecture PMU events
+- [ ] Phase 1 system environment static info (hardware specs, software versions, kernel boot parameters)
+- [ ] Phase 2.1 global bottleneck identification (mpstat, iostat, pidstat, sar)
+- [ ] Phase 2.2 top process identification (ps, iotop, pidstat)
+- [ ] Phase 3 hotspot function and syscall analysis (perf, strace)
+- [ ] Phase 4 microarchitecture PMU events (perf stat)
 
 **Output format for each bottleneck**:
 ```
@@ -271,218 +291,14 @@ The skill allows repeated cycles to narrow the analysis scope:
 
 - **When to iterate**: Bottleneck(s) not yet identified with sufficient evidence, or next steps are unclear.
 - **How to iterate**: Each cycle narrows focus (e.g., specific container, port, device). Re-run Phase 1 if system state may have changed; otherwise reuse existing data and deepen analysis.
-- **Important — Complete All Phases Before Concluding**: Do NOT stop analysis early once an initial bottleneck is found. All phases (Phase 1 + all Step 2.x subsections) must be fully executed and reported before concluding. Early termination prevents discovering secondary bottlenecks that may be equally or more impactful. The final report is only complete when every section of the Output Template has been filled with actual data.
+- **Important — Complete All Phases Before Concluding**: Do NOT stop analysis early once an initial bottleneck is found. All phases (Phase 1 through Phase 5) must be fully executed and reported before concluding. Early termination prevents discovering secondary bottlenecks that may be equally or more impactful. The final report is only complete when every section of the Output Template has been filled with actual data.
 - **Stop when**: All phases are fully executed, all evidence collected, all bottleneck categories mapped, and the user confirms the report is complete.
 
 ---
 
 ## Output Template
 
-```markdown
-## Phase 0: Benchmark Status
-- Benchmark Running: [Yes/No — if Yes, record PID and duration]
-- Workload During Collection: [Existing production workload / Synthetic benchmark]
-
-## Phase 1: System Collection Summary
-
-**Collected Raw Data Summary**:
-- CPU: [avg %user, %sys, %iowait, %idle across all cores; load average; context switch rate]
-- Memory: [total, used, free, available, swap used; major/minor page faults]
-- Disk I/O: [device(s) with highest %util, avg await, read/write KB/s per device]
-- Network: [interface(s) with highest rx/tx KB/s, error/drop rates, TCP retrans rate]
-- Kernel: [uptime, slab info, file descriptors, process count]
-- Hardware: [CPU model, core count, NUMA nodes, memory size]
-
-## Phase 2: Main Workload and Bottleneck Analysis
-
-### 2.1 Global Resource Bottleneck Identification
-
-| Resource | Key Metrics | Status | Severity |
-|----------|-------------|--------|----------|
-| CPU | %user=%x, %iowait=%x, loadavg=%x | [Normal/Pressured/Saturated] | [Low/Medium/High/Critical] |
-| Memory | used=%x, swap=%x, majflt/s=%x | [Normal/Pressured/Saturated] | [Low/Medium/High/Critical] |
-| Disk I/O | %util=%x, await=%xms | [Normal/Pressured/Saturated] | [Low/Medium/High/Critical] |
-| Network | rxerr/s=%x, txerr/s=%x, retrans=%x% | [Normal/Pressured/Saturated] | [Low/Medium/High/Critical] |
-
-**Global Bottleneck Summary**: [Identify the primary bottleneck resource with specific evidence. All four resources must be assessed.]
-
-### 2.2 Top Resource Process Identification
-
-| PID | Name | CPU% | Mem% | IO% | OS Role |
-|-----|------|------|------|-----|---------|
-
-**Top 5 Hot Functions per Process** (from `perf record` / `perf top`):
-| PID | Function | CPU% | Category | Evidence Source |
-|-----|----------|------|----------|------------------|
-| [PID] | [function_name] | [x%] | [user/kernel] | perf record -p [PID] -g -- sleep 60 |
-| [PID] | [function_name] | [x%] | [user/kernel] | perf record -p [PID] -g -- sleep 60 |
-| [PID] | [function_name] | [x%] | [user/kernel] | perf record -p [PID] -g -- sleep 60 |
-| [PID] | [function_name] | [x%] | [user/kernel] | perf record -p [PID] -g -- sleep 60 |
-| [PID] | [function_name] | [x%] | [user/kernel] | perf record -p [PID] -g -- sleep 60 |
-
-**System Call Analysis** (from `strace -c -p [PID]` and `strace -T -p [PID]`):
-| PID | Syscall | Count/s | Avg Latency | Pattern | Notes |
-|-----|---------|---------|-------------|---------|-------|
-| [PID] | [syscall_name] | [n] | [x]ms | [frequent/slow/anomalous] | [specific observation] |
-| [PID] | [syscall_name] | [n] | [x]ms | [frequent/slow/anomalous] | [specific observation] |
-| [PID] | [syscall_name] | [n] | [x]ms | [frequent/slow/anomalous] | [specific observation] |
-| [PID] | [syscall_name] | [n] | [x]ms | [frequent/slow/anomalous] | [specific observation] |
-| [PID] | [syscall_name] | [n] | [x]ms | [frequent/slow/anomalous] | [specific observation] |
-
-**Top System Calls by Frequency** (from `strace -c -p [PID]`):
-| PID | Syscall | Total Count | % of Total | Status |
-|-----|---------|-------------|------------|--------|
-| [PID] | [name] | [n] | [x]% | [normal/elevated/critical] |
-| [PID] | [name] | [n] | [x]% | [normal/elevated/critical] |
-| [PID] | [name] | [n] | [x]% | [normal/elevated/critical] |
-
-**Long-Running System Calls** (from `strace -T -p [PID]`):
-| PID | Syscall | Duration | Frequency | Root Cause Hypothesis |
-|-----|---------|----------|----------|----------------------|
-| [PID] | [name] | [x]ms | [n] occurrences | [blocking on I/O/lock/network/...] |
-| [PID] | [name] | [x]ms | [n] occurrences | [blocking on I/O/lock/network/...] |
-
-### 2.3 Microarchitecture Bottleneck Analysis
-
-| Component | Metric | Value | Threshold | Status |
-|-----------|--------|-------|-----------|--------|
-| L1 Cache | L1-dcache-load-misses / L1-dcache-loads | [x]% | >10% | [Normal/Elevated/Critical] |
-| LLC Cache | LLC-load-misses / LLC-loads | [x]% | >20% | [Normal/Elevated/Critical] |
-| Branch Prediction | branch-misses / branches | [x]% | >5% | [Normal/Elevated/Critical] |
-| Frontend Stall | stalled-cycles-frontend / cycles | [x]% | >30% | [Normal/Elevated/Critical] |
-| Backend Stall | stalled-cycles-backend / cycles | [x]% | >20% | [Normal/Elevated/Critical] |
-| NUMA Locality | remote_loads / local_loads | [x]:1 | >2:1 | [Normal/Imbalanced] |
-
-### 2.4 Topology Analysis
-
-**Process Dependency Topology**:
-- [List all key processes and their relationships: parent → child, I/O wait chains]
-- [Identify which processes are causing cascading resource pressure]
-
-**Resource Dependency Graph**:
-- [Map resource → process → OS component: e.g., Disk sda → mysqld → jbd2/dm-0-8]
-
-### 2.5 Evidence-Based Bottleneck Mapping
-
-| PID | TID | Name | OS Role | Main Bottleneck | Severity | Evidence |
-|-----|-----|------|---------|-----------------|----------|----------|
-| [PID] | [TID] | [name] | [kernel/daemon/user] | [bottleneck type] | [Critical/High/Medium/Low] | [metric=value, threshold=..., status=...] |
-| [PID] | [TID] | [name] | [kernel/daemon/user] | [bottleneck type] | [Critical/High/Medium/Low] | [metric=value, threshold=..., status=...] |
-| [PID] | [TID] | [name] | [kernel/daemon/user] | [bottleneck type] | [Critical/High/Medium/Low] | [metric=value, threshold=..., status=...] |
-
-### 2.6 Final Bottleneck Summary
-
-**Primary Bottleneck**: [Resource/Component]
-- Severity: [Critical/High/Medium/Low]
-- Evidence: [All supporting metrics from Steps 2.1-2.5]
-- Affected Processes: [All PIDs affected]
-
-**Secondary Bottleneck(s)**: [List all other identified bottlenecks in order of severity]
-
-**Bottleneck Chain**: [If multiple bottlenecks are causally linked, describe the chain: e.g., mysqld → high write I/O → jbd2 → disk saturation → CPU iowait]
-
-**OS-Level Root Cause Hypothesis**: [Single-sentence hypothesis of the OS-level root cause]
-
-### 2.7 OS-Level Preliminary Optimization Recommendations
-
-Based on the bottleneck analysis above, the following OS-level kernel/subsystem tuning actions are recommended. **Only OS-level tunables (`sysctl`, `/proc`, `/sys`) are in scope — do NOT include application-layer configuration changes (e.g., database parameters, JVM flags, application config files).** Apply only after confirming the current kernel parameters and that changes are safe for the running workload.
-
-**CPU Bottleneck Recommendations**:
-| Bottleneck Type | OS-Level Recommendation | Expected Effect | Safety Note |
-|-----------------|------------------------|-----------------|-------------|
-| High %user (>80%) | Check `nice`/`renice` priority; consider CPU affinity pinning via `taskset`; if latency-sensitive workload, enable tickless kernel (`nohz_full`) via `nohz_full=<cpu-list>` kernel cmdline | Reduce scheduling contention | Verify no other critical processes are affected by affinity changes |
-| High %iowait (>20%) | See Disk I/O section below; also check `vm.dirty_ratio` and `vm.dirty_background_ratio` | Reduce CPU blocked on I/O | Monitor disk latency after changes |
-| High %soft (>10%) | Review kernel softirq configuration; check `net.core.netdev_budget`; enable/configure `irqbalance` service | Reduce softirq CPU overhead | Monitor network throughput after changes |
-| High %steal (>10%) | (VM) Not directly tunable inside guest; consider VM host-level CPU quota or CPU pinning adjustment | N/A | N/A |
-| High context switches (>50k/s) | Identify syscall-heavy processes via `strace`; reduce system call frequency at OS level (e.g., check unnecessary `fsync`, `sync_file_range` calls); use compiler-level optimization (`-fno-stack-protector` if stack checks overhead is high) to reduce per-call overhead | Lower scheduler pressure | Monitor scheduling latency after changes |
-| CPU-bound workload with high IPC | Compiler-level: rebuild with `-O3 -march=native -mtune=native` for CPU-specific optimizations; check `-fprofile-use` for PGO | Improve instruction-level parallelism and reduce instruction overhead | PGO requires representative training workload; test in staging |
-
-**Memory Bottleneck Recommendations**:
-| Bottleneck Type | OS-Level Recommendation | Expected Effect | Safety Note |
-|-----------------|------------------------|-----------------|-------------|
-| Swap used > 50% | Reduce `vm.swappiness` (e.g., to 10 or lower for SSD-backed swap); increase `vm.min_free_kbytes` to retain more free memory | Reduce page-in/page-out thrashing | Lower swappiness may cause OOM in some configs |
-| majflt/s > 1000 | Increase `vm.min_free_kbytes`; check `vm.vfs_cache_pressure` | Reduce major page faults | Monitor memory pressure after changes |
-| Slab > 30% total | Check `/proc/slabinfo` for high-use slabs; tune `vm.memory_balloon` (if enabled) | Free kernel memory for user processes | Monitor kernel stability |
-| NUMA imbalance (remote/local > 2:1) | Enable NUMA balancing via `numactl --interleave=all` or tune `numa_balancing` via `/proc/sys/kernel/numa_balancing` | Reduce remote memory access latency | Not all workloads benefit from interleave |
-| Excessive malloc/free fragmentation | Replace system malloc with jemalloc via `LD_PRELOAD=/usr/lib64/libjemalloc.so.2` or via `/etc/ld.so.preload`; alternatively configure `MALLOC_ARENA_MAX` env var | Reduce memory allocator fragmentation and improve multi-threaded memory performance | Verify jemalloc is compatible with the application; test in staging |
-
-**Disk I/O Bottleneck Recommendations**:
-| Bottleneck Type | OS-Level Recommendation | Expected Effect | Safety Note |
-|-----------------|------------------------|-----------------|-------------|
-| %util > 90%, await > 20ms | Change I/O scheduler to `mq-deadline` or `none` (for SSD/NVMe): `echo mq-deadline > /sys/block/<device>/queue/scheduler` | Reduce I/O queue latency | Test in staging first |
-| High write latency | Reduce `vm.dirty_background_ratio` (e.g., to 5) and `vm.dirty_ratio` (e.g., to 20); enable `vm.dirty_writeback_centisecs=500` | Batch disk writes more aggressively | May increase RAM usage |
-| High read latency | Increase `vm.pagecache` or use `readahead` tuning; check `blkdiscard` for SSD TRIM | Improve read-ahead effectiveness | Verify filesystem supports readahead changes |
-| Queue depth saturation | Increase `nr_requests` via `/sys/block/<device>/queue/nr_requests` (e.g., to 1024) | Allow more in-flight I/O | May increase latency for individual ops |
-| High disk I/O across multiple devices | Enable and tune `irqbalance` service to distribute storage interrupts across CPU cores | Reduce interrupt contention on single core | Verify storage device supports multi-queue IRQ routing |
-| Transparent hugepage fragmentation | Enable transparent hugepages (`always`): `echo always > /sys/kernel/mm/transparent_hugepage/enabled`; tune `khugepaged` via `/sys/kernel/mm/transparent_hugepage/khugepaged/` | Reduce memory fragmentation for large workloads | May cause latency spikes in some applications; monitor |
-| I/O priority contention | Use `ionice` to set CFQ/bfq scheduler for latency-sensitive processes; combine with `nice` for CPU/IO priority separation | Isolate latency-sensitive I/O from bulk I/O | Verify CFQ/bfq is available on the system |
-
-**Network Bottleneck Recommendations**:
-| Bottleneck Type | OS-Level Recommendation | Expected Effect | Safety Note |
-|-----------------|------------------------|-----------------|-------------|
-| High retransmission (>2%) | Tune `tcp_rmem`/`tcp_wmem`; enable `tcp_tw_reuse=1`; increase `tcp_max_syn_backlog` | Reduce retransmissions and TIME_WAIT buildup | Monitor connection stability |
-| ListenOverflows/Drops > 0 | Increase `net.core.somaxconn` and `net.ipv4.tcp_max_syn_backlog` | Accept more incoming connections | Verify socket backlog capacity at OS level is sufficient |
-| High TIME_WAIT (>5000) | Enable `tcp_tw_reuse=1`; reduce `net.netfilter.nf_conntrack_tcp_timeout_time_wait` | Free socket buffer memory | Not safe if NAT/conntrack is in use |
-| High socket memory | Increase `net.core.rmem_max`/`wmem_max`; tune `net.ipv4.tcp_rmem`/`tcp_wmem` | Prevent socket buffer exhaustion | Monitor network throughput |
-| High softirq CPU from network | Enable/configure `irqbalance` service to distribute NIC IRQ across cores; increase `net.core.netdev_budget` (e.g., to 600) and `net.core.netdev_cost` (e.g., to 1000) | Reduce softirq CPU bottleneck on single core | Monitor network throughput and latency after changes |
-
-**Microarchitecture Bottleneck Recommendations**:
-| Bottleneck Type | OS-Level Recommendation | Expected Effect | Safety Note |
-|-----------------|------------------------|-----------------|-------------|
-| L1/LLC cache miss high | Enable transparent hugepages (`always`): `echo always > /sys/kernel/mm/transparent_hugepage/enabled`; or use explicit hugepages via `vm.nr_hugepages` | Reduce memory footprint per access | May cause latency spikes in some workloads; monitor |
-| Branch misprediction high | Compiler-level: rebuild application with `-fbranch-probabilities` and `-fprofile-use` for profile-guided optimization; OS-level: reduce thread count to improve instruction cache | Reduce branch misprediction | Profile-guided optimization requires training workload; test in staging |
-| Frontend stalls high | Reduce number of active processes/threads; tune `kernel.sched_migration_cost_ns` | Reduce instruction fetch stalls | Monitor scheduling latency |
-| Backend stalls high | Memory bandwidth issue: increase `vm.zone_reclaim_mode` (for NUMA); tune `kernel.percpu_cpu_distance` | Reduce memory access latency | May increase local vs remote tradeoffs |
-
-**Context Switch / Scheduler Recommendations**:
-| Bottleneck Type | OS-Level Recommendation | Expected Effect | Safety Note |
-|-----------------|------------------------|-----------------|-------------|
-| cs/s > 50000 | Use `perf sched` to identify scheduling latency; reduce `kernel.sched_cfs_bandwidth_slice_us` (to 5ms); consider `kernel.sched_autogroup_enabled=0` to disable autogroup scheduling | Reduce scheduling overhead | Monitor for throttling side effects |
-| in/s > 10000 | Check IRQ affinity via `/proc/irq/*/smp_affinity`; enable/configure `irqbalance` service to automatically balance interrupts across cores | Distribute interrupts across cores | Verify IRQ pinning doesn't break latency-sensitive apps |
-| Scheduling latency spikes | Use `tuned` service with a latency-performance profile: `tuned-adm profile latency-performance`; or manually set `kernel.sched_migration_cost_ns=500000` to reduce unnecessary process migrations | Reduce scheduling migration overhead | Monitor workload throughput after changes |
-
-**Priority Order of OS-Level Actions**:
-1. **Highest priority**: Actions addressing Critical-severity bottlenecks
-2. **Second priority**: Actions addressing bottleneck chains (root cause first)
-3. **Third priority**: Actions addressing High-severity bottlenecks
-4. **Low priority**: Actions for Medium/Low improvements
-
-**Scope of Allowed OS-Level Recommendations**:
-OS-level optimizations include, but are not limited to:
-- **Kernel/subsystem tunables**: `sysctl` variables (e.g., `vm.swappiness`), `/proc` paths, `/sys` paths
-- **Compiler-level optimizations**: compiler flags that affect binary performance (e.g., `-O3`, `-march=native`, `-fbranch-probabilities`) — these optimize how the application binary runs without changing application source code
-- **OS-level library replacements**: swapping OS-level libraries that affect process behavior (e.g., replacing glibc `malloc` with `jemalloc` via `LD_PRELOAD` or system-wide linker config — this changes memory allocator behavior at the OS level, not the application level)
-- **OS basic service tuning**: tuning OS-level services that affect system performance (e.g., `irqbalance` service, `ksmd`/`khugepaged` for transparent hugepages, `tuned`/`sysctl` for profile-based tuning)
-- **OS resource management**: cgroups, namespaces, CPU affinity, process priority (`nice`/`renice`), NUMA policy (`numactl`)
-
-**NOT Allowed — Application-Layer Changes**:
-- Application source code or logic changes
-- Application configuration files or parameters (e.g., MySQL `innodb_buffer_pool_size`, PostgreSQL `shared_buffers`, JVM `-Xmx`, Redis `maxmemory`, application business logic)
-
-**Constraints on Recommendations**:
-- Every recommendation must reference a specific **OS-level tunable**: a `sysctl` variable, a `/proc` or `/sys` path, a compiler/linker flag, an OS service or library replacement, or an OS resource management mechanism. If no OS-level mechanism exists, state "No direct OS-level tunable — investigate OS-level workarounds (e.g., process priority, IRQ affinity)"
-- For each recommendation, include a **safety note** — OS-level changes can have unintended side effects
-- Always recommend **monitoring the effect** after applying a change
-- If unsure of a safe value range, recommend testing in a non-production environment first
-- If a bottleneck appears to require application-level fixes, only describe it in OS terms (e.g., "process spending 95% CPU in user space issuing 20k write syscalls/s") and do not suggest application configuration changes
-
----
-
-**Report Completeness Checklist**:
-- [x] Phase 0: Benchmark status recorded (or existing workload confirmed)
-- [x] Phase 1: All system metrics collected and summarized (CPU, Memory, Disk, Network, Kernel)
-- [x] Step 2.1: All four global resources assessed with severity ratings
-- [x] Step 2.2: Hot function analysis completed for top processes
-- [x] Step 2.2: System call analysis completed for top processes
-- [x] Step 2.2: Frequency and latency analysis completed for top processes
-- [x] Step 2.3: All microarchitecture metrics collected and assessed
-- [x] Step 2.4: Process and resource topology mapped
-- [x] Step 2.5: All bottlenecks mapped with evidence and severity
-- [x] Step 2.6: Final bottleneck summary written — no bottleneck left unmapped
-- [x] Step 2.7: OS-level preliminary optimization recommendations provided for all identified bottlenecks
-
-**Analysis is complete only when ALL items above are checked.**
-```
+reference:output-template
 
 ---
 
