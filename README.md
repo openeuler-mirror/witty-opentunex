@@ -35,6 +35,7 @@ yum install -y sysstat util-linux iproute bc numactl ethtool iotop strace perf n
 安装 opencode：
 ```sh
 yum install nodejs
+# 配置国内npm镜像源：npm config set registry https://registry.npmmirror.com
 npm install -g opencode-ai
 ```
 opencode安装&使用参考文档：https://opencode.ai/docs/zh-cn/

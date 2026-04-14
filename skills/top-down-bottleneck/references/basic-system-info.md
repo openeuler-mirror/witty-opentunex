@@ -1,13 +1,9 @@
 ---
 name: basic-system-info
-description: Collect basic system information (CPU, memory, disk, network)
+description: Collect system environment static information (hardware specs, software versions, kernel boot parameters)
 ---
 
-# basic-system-info — System Information Collection
-
-**Delegation**: When delegating to sys-sniffer, use **ONE** task call: 
-\`task(subagent_type="sys-sniffer", run_in_background=true, load_skills=["basic-system-info"], description="Gather system info", prompt="Collect CPU, memory, disk, network, kernel, process, security, hardware. Output raw data in <collected> format.")\`. 
-Do NOT spawn multiple tasks (e.g. one per CPU/memory/disk) — each task requires \`subagent_type\` or \`category\`, and splitting causes "Unknown Task" failures.
+# basic-system-info — System Environment Static Information Collection
 
 ## Client Connection and Command Execution
 
@@ -17,100 +13,94 @@ skill:remote-execution
 
 ---
 
-## Ensure Tool is available
-```
-mpstat -V
-iostat -V
-pidstat -V
-perf --version
+## Hardware Specifications
+
+```bash
+# CPU model, sockets, cores, threads, cache sizes
+lscpu
+
+# NUMA topology
+numactl --hardware 2>/dev/null || true
+
+# Memory size and DIMM info
+dmidecode -t memory 2>/dev/null | grep -E "Size|Speed|Type|Locator" || true
+
+# Physical memory summary
+cat /proc/meminfo | grep -E "MemTotal|SwapTotal|HugePages_Total|HugePages_Free"
+
+# Disk devices and topology (ROTA=1 means rotational/HDD, ROTA=0 means SSD)
+lsblk -o NAME,SIZE,TYPE,ROTA,MOUNTPOINT
+
+# SCSI device info
+cat /proc/scsi/scsi 2>/dev/null || true
+
+# NIC models
+lspci | grep -i eth || true
+
+# NIC driver and firmware versions
+for iface in $(ls /sys/class/net/ | grep -v lo); do echo "=== $iface ==="; ethtool -i $iface 2>/dev/null || true; done
+
+# Hardware model
+cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || true
+dmidecode -t system 2>/dev/null | grep -E "Manufacturer|Product Name|Version" || true
+
+# CPU frequency scaling info
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || true
+cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null || true
 ```
 
 ---
 
-## CPU Diagnostics
+## Software Versions
 
 ```bash
-# Per-CPU usage
-mpstat -P ALL 1 5
-# High CPU processes
-pidstat -u 1 5
-pidstat -u 1 5 | awk 'NR<=3 || $8>10'
-# Thread-level CPU details
-pidstat -u -t -p <PID> 1 5
-# Context switch statistics
-vmstat 1 | awk '{print $12, $13}'
-pidstat -w 1 5
-# history cpu stat
-cat /proc/stat | grep cpu
+# OS release
+cat /etc/os-release
+
+# Kernel version and build
+uname -r && uname -v
+
+# GCC version (affects compiled binary performance)
+gcc --version 2>/dev/null | head -1 || true
+
+# glibc version
+ldd --version 2>/dev/null | head -1 || true
 ```
 
 ---
 
-## Memory Diagnostics
+## Kernel Boot Parameters
 
 ```bash
-# Overview
-free -h
-# Detailed meminfo
-cat /proc/meminfo | grep -E "MemTotal|MemFree|MemAvailable|Buffers|Cached|SwapTotal|SwapFree|Slab|SReclaimable|SUnreclaim|Dirty|Writeback|AnonPages|Mapped|Shmem|HugePages"
-# Slab analysis
-slabtop -o | head -20
-# Process PSS (if smem installed)
-smem -rkt -s pss | head -20
-# Process memory mapping
-pmap -x <PID> | tail -1
-cat /proc/<PID>/status | grep -E "VmSize|VmRSS|VmSwap|Threads"
-cat /proc/<PID>/smaps_rollup
-# OOM Killer events
-dmesg | grep -i "oom\|out of memory" | tail -20
-dmesg | grep "Killed process"
-```
+# Kernel command line (all boot parameters)
+cat /proc/cmdline
 
----
+# Key performance-related sysctl switches (NOT full listing — only knobs with direct performance impact)
+sysctl -a 2>/dev/null | grep -E "^vm\.(swappiness|dirty_ratio|dirty_background_ratio|dirty_writeback_centisecs|min_free_kbytes|vfs_cache_pressure|overcommit_memory|overcommit_ratio|nr_hugepages|zone_reclaim_mode|numa_balancing)" || true
+sysctl -a 2>/dev/null | grep -E "^net\.(core\.(somaxconn|netdev_max_backlog|netdev_budget|rmem_max|wmem_max)|ipv4\.(tcp_tw_reuse|tcp_max_syn_backlog|tcp_rmem|tcp_wmem|tcp_syncookies|tcp_fin_timeout|tcp_fastopen))" || true
+sysctl -a 2>/dev/null | grep -E "^kernel\.(sched_(min_granularity_ns|wakeup_granularity_ns|migration_cost_ns|cfs_bandwidth_slice_us|autogroup_enabled)|numa_balancing|threads-max)" || true
+sysctl -a 2>/dev/null | grep -E "^fs\.(file-max|aio-max-nr|nr_open|inotify\.)" || true
 
-## Disk I/O Diagnostics
+# Performance-relevant kernel modules only (NOT full lsmod)
+lsmod 2>/dev/null | grep -iE "kvm|nvme|mlx|io_uring|dpdk|vfio|iommu|intel_cstate|intel_uncore|acpi_cpufreq|cpufreq|tuned" || true
 
-```bash
-# Disk IO stats
-iostat -xz 1 5
-# IO-heavy processes (batch mode)
-iotop -oP -b -n 5 -d 1
-# Process-level IO
-pidstat -d 1 5
-pidstat -d -p <PID> 1 5
-# Filesystem space / inode summary
-df -hT
-df -i
-du -sh /* 2>/dev/null | sort -rh | head -10
-lsof +L1   # Deleted but still open files
-```
+# Kernel tickless / nohz / preempt config
+cat /boot/config-$(uname -r) 2>/dev/null | grep -E "NO_HZ|HZ_1000|PREEMPT" || true
 
----
+# Transparent hugepage status
+cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true
 
-## Network Diagnostics
+# I/O scheduler for each block device
+for dev in $(ls /sys/block/); do echo "$dev: $(cat /sys/block/$dev/queue/scheduler 2>/dev/null)"; done || true
 
-```bash
-# Connection overview
-ss -s
-ss -tan state time-wait | wc -l
-ss -tn state established | awk '{print $4}' | awk -F: '{print $NF}' | sort | uniq -c | sort -rn | head -10
-ss -tlnp
-# NIC traffic (if sar available)
-sar -n DEV 1 5
-sar -n EDEV 1 5
-sar -n TCP,ETCP 1 5
-# Protocol stack counters
-nstat -az | grep -i tcp
-nstat -az | grep -E "TcpRetransSegs|TcpExtTCPLostRetransmit|TcpExtListenOverflows|TcpExtListenDrops|TcpExtTCPAbortOnMemory"
-# NIC errors / drops
-ethtool -S eth0 | grep -i error
-ethtool -S eth0 | grep -i drop
-ethtool -g eth0
-cat /proc/net/softnet_stat
+# IRQ affinity configuration
+cat /proc/irq/default_smp_affinity 2>/dev/null || true
 ```
 
 ---
 
 ## Usage Notes
 
-- **stat tools**: Recommend sampling with `interval 1 count 5` (e.g., `1 5`)
+- **Static info only**: This reference collects STATIC system facts. Dynamic runtime metrics (CPU utilization, memory pressure, I/O throughput) are collected in Phase 2.
+- **Tolerate missing tools**: `dmidecode`, `ethtool`, `numactl` may not be available — use `|| true` to tolerate failures.
+- **Root required**: `dmidecode` and some `ethtool` operations require root access.
