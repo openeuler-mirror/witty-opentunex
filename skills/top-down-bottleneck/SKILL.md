@@ -24,6 +24,12 @@ The skill supports iterative refinement until sufficient analysis is achieved.
 
 ---
 
+## Heavyweight Command Constraints (CRITICAL)
+
+**Heavyweight commands** (`perf record`, `perf top`, `perf stat`, `strace`) attach to the target process and alter its runtime behavior. They MUST run sequentially — wait for the current command to complete before starting the next. Do NOT run concurrently with any other collection or analysis command.
+
+---
+
 ## Phase 1: System Environment Static Information Collection
 
 **Objective**: Gather static system environment information — hardware specifications, software versions, and kernel boot parameters. This phase collects **static** facts about the system, not dynamic runtime metrics.
@@ -31,6 +37,8 @@ The skill supports iterative refinement until sufficient analysis is achieved.
 reference:basic-system-info
 
 **Output**: Static system profile: hardware specs (CPU model/core count/NUMA, memory size, disk types, NIC models), software versions (OS, kernel, tools), kernel boot parameters and key sysctl settings.
+
+**One-command collection**: To run all Phase 1 commands in a single script, use `scripts/phase1-static-info.sh`. No parameters required. Requires root for `dmidecode`/`ethtool`.
 
 ---
 
@@ -114,6 +122,8 @@ echo "TIME_WAIT connections:" && ss -tan state time-wait | wc -l
 
 **Output**: Identify which resource(s) are under highest pressure with specific evidence (e.g., "CPU bottleneck: %iowait consistently 25-35% across 5 samples").
 
+**One-command collection**: To run all Phase 2.1 commands sequentially in a single script, use `scripts/phase2.1-global-bottleneck.sh`. No parameters required. All commands are lightweight. Runtime ~30 seconds.
+
 ---
 
 ### Step 2.2: Top Resource Process Identification
@@ -135,9 +145,15 @@ ps aux --sort=-%mem | head -20
 { echo "      UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s iodelay  Command"; pidstat -d 1 5 | grep 'Average' | grep -v "UID" | sort -k5 -rn | head -20; }
 ```
 
+**One-command collection**: To run all Phase 2.2 commands in a single script, use `scripts/phase2.2-top-processes.sh`. No parameters required. `iotop` requires root.
+
 ---
 
 ## Phase 3: Hotspot Function and Syscall Analysis
+
+⚠️ **HEAVYWEIGHT PHASE — All commands in this phase are heavyweight and MUST run sequentially.** See "Heavyweight Command Constraints" section above.
+
+**Execution order**: Step 3.1 → wait for completion → Step 3.2. Do NOT overlap.
 
 ### Step 3.1: Hotspot Function Analysis
 
@@ -146,13 +162,15 @@ ps aux --sort=-%mem | head -20
 ```bash
 # Record performance data for target process (30 seconds)
 perf record -p <PID> -g -- sleep 30
-# Analyze recorded data
-perf report
+# Analyze recorded data (only show symbols with overhead >= 1%)
+perf report --stdio --percent-limit 1
 # Real-time sampling
 perf top -p <PID>
 # Generate flamegraph (requires flamegraph tools, tolerate if not installed)
 perf record -F 99 -p <PID> -g -- sleep 30 && perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg || true
 ```
+
+**One-command collection**: To run all Phase 3.1 commands sequentially in a single script, use `scripts/phase3.1-hotspot-function.sh <PID>`. Parameter: `PID` — target process ID (required). Requires root. Runtime ~60-90 seconds.
 
 ### Step 3.2: Syscall Analysis
 
@@ -160,13 +178,11 @@ perf record -F 99 -p <PID> -g -- sleep 30 && perf script | stackcollapse-perf.pl
 
 **syscall analysis**:
 ```bash
-# Trace system calls
-strace -p <PID> -c -f -o strace.out
-# Trace with timestamps
-strace -p <PID> -T -tt -f -o strace_timestamps.out
-# System call latency histogram
-perf trace -p <PID>
+# Trace system calls (summary with counts, latency, errors)
+strace -p <PID> -c -f
 ```
+
+**One-command collection**: To run all Phase 3.2 commands in a single script, use `scripts/phase3.2-syscall-analysis.sh <PID>`. Parameter: `PID` — target process ID (required). Requires root. ⚠️ Must run AFTER Phase 3.1 completes.
 
 **Key Metrics to Analyze**:
 - Top hotspot functions by CPU time (perf report)
@@ -186,40 +202,42 @@ perf trace -p <PID>
 
 ## Phase 4: Microarchitecture Bottleneck Analysis
 
+⚠️ **HEAVYWEIGHT PHASE — All `perf stat` commands in this phase are heavyweight and MUST run sequentially.** See "Heavyweight Command Constraints" section above. 
+
 Use PMU (Performance Monitoring Unit) events to identify cache, branch, and pipeline bottlenecks:
 
 **CPU Cache Analysis**:
 ```bash
 # Cache miss rates (portable across x86/ARM)
-perf stat -e cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses -p <PID> -- sleep 30
+perf stat -e cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses -p <PID> -- sleep 15
 # Key indicators: L1 miss rate > 10%, LLC miss rate > 20%
 # TLB miss statistics (may not be available on all platforms, tolerate errors)
-perf stat -e dTLB-load-misses,iTLB-load-misses -p <PID> -- sleep 30 || true
+perf stat -e dTLB-load-misses,iTLB-load-misses -p <PID> -- sleep 15 || true
 ```
 
 **Branch Prediction and Pipeline Analysis**:
 ```bash
 # Branch misprediction rate (branches may not be supported on all platforms)
-perf stat -e branches,branch-misses -p <PID> -- sleep 30 || true
+perf stat -e branches,branch-misses -p <PID> -- sleep 15 || true
 # Pipeline stall analysis
-perf stat -e stalled-cycles-frontend,stalled-cycles-backend,cycles,instructions -p <PID> -- sleep 30
+perf stat -e stalled-cycles-frontend,stalled-cycles-backend,cycles,instructions -p <PID> -- sleep 15
 # Key indicators: branch miss rate > 5%, frontend stalls > 30% cycles, backend stalls > 20% cycles
 ```
 
 **Top-Down Microarchitecture Analysis**:
 ```bash
 # Portable pipeline metrics (cycles, instructions available everywhere)
-perf stat -e cycles,instructions -p <PID> -- sleep 30
+perf stat -e cycles,instructions -p <PID> -- sleep 15
 # Intel-only uops metrics (tolerate error on non-Intel platforms)
-perf stat -e uops_executed,uops_retired -p <PID> -- sleep 30 || true
+perf stat -e uops_executed,uops_retired -p <PID> -- sleep 15 || true
 # Intel pmu-tools Top-Down analysis (Intel-only, tolerate if not installed)
-toplev -p <PID> --sleep 30 || true
+toplev -p <PID> --sleep 15 || true
 ```
 
 **Memory Bandwidth and NUMA**:
 ```bash
-# NUMA-related metrics (may not exist on non-NUMA platforms, tolerate errors)
-perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 30 || true
+# Intel-only (may not exist on non-NUMA platforms, tolerate errors)
+perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 15 || true
 # Key indicators: remote/local > 2:1 indicates NUMA imbalance
 ```
 
@@ -229,6 +247,8 @@ perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 3
 - Frontend/backend stall percentages
 - NUMA locality ratios
 - Identified microarchitecture bottlenecks (e.g., "L1 cache miss rate 15% - high memory access density at OS level")
+
+**One-command collection**: To run all Phase 4 commands sequentially in a single script, use `scripts/phase4-microarch.sh <PID>`. Parameter: `PID` — target process ID (required). Requires root. Runtime ~1.5-2 minutes. ⚠️ Must run AFTER Phase 3 completes. All `perf stat` groups are serialized within the script.
 
 ---
 

@@ -16,6 +16,17 @@
 
 **Scope**: 仅分析OS级别资源，不包含应用层数据
 
+## ⚠️ 重量级命令约束
+
+`perf`和`strace`是重量级命令，会attach到目标进程并改变其运行时行为。**禁止在同一PID上并行运行重量级命令**，否则数据不可靠且可能导致目标进程崩溃。
+
+| 类别 | 命令 | 可并行 | 原因 |
+|------|------|--------|------|
+| 轻量级 | mpstat, vmstat, iostat, pidstat, sar, free, ss, nstat, ps | ✅ | 只读观测 |
+| 重量级 | perf record, perf top, perf stat, perf trace, strace | ❌ | Attach进程 |
+
+**规则**: Phase 2.1轻量级命令可并行；Phase 3内Step 3.1→3.2必须串行；Phase 4内perf stat组必须串行。
+
 ## 前置依赖
 
 ### 必需依赖
@@ -68,12 +79,12 @@ Phase 2: 主负载识别与瓶颈分析
         ├→ 高内存进程
         └→ 高IO进程
 
-Phase 3: 热点函数与系统调用分析
-    ├→ Step 3.1: 热点函数分析 (perf)
-    └→ Step 3.2: 系统调用分析 (strace)
+Phase 3: 热点函数与系统调用分析 ⚠️重量级-必须串行
+    ├→ Step 3.1: 热点函数分析 (perf) → 完成后
+    └→ Step 3.2: 系统调用分析 (strace) → 完成后
 
-Phase 4: 微架构瓶颈分析
-    └→ PMU events: cache/branch/pipeline/NUMA
+Phase 4: 微架构瓶颈分析 ⚠️重量级-必须串行
+    └→ PMU events: cache → branch/pipeline → NUMA (依次执行)
 
 Phase 5: 基于证据的瓶颈分析
     ├→ 拓扑分析
@@ -140,6 +151,21 @@ Phase 5: 基于证据的瓶颈分析
 | 热点分析 | Skill输出 | perf热点函数报告 |
 | 系统调用分析 | Skill输出 | strace系统调用报告 |
 | 微架构分析 | Skill输出 | PMU事件分析报告 |
+
+## 一键采集脚本
+
+各Phase提供一键采集脚本，可将该Phase所有命令串行执行完成：
+
+| 脚本 | 参数 | 说明 | 运行时间 |
+|------|------|------|----------|
+| `scripts/phase1-static-info.sh` | 无 | 系统静态信息采集 | ~5s |
+| `scripts/phase2.1-global-bottleneck.sh` | 无 | 全局资源瓶颈识别 | ~30s |
+| `scripts/phase2.2-top-processes.sh` | 无 | 高资源消耗进程识别 | ~10s |
+| `scripts/phase3.1-hotspot-function.sh` | `<PID>` | perf热点函数分析 (⚠️重量级) | ~60-90s |
+| `scripts/phase3.2-syscall-analysis.sh` | `<PID>` | strace系统调用分析 (⚠️重量级) | 视进程活动 |
+| `scripts/phase4-microarch.sh` | `<PID>` | 微架构PMU分析 (⚠️重量级) | ~1.5-2min |
+
+⚠️ 重量级脚本必须严格按顺序执行：phase3.1 → phase3.2 → phase4，不可并行。
 
 ## 参考文档
 

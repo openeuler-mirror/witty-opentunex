@@ -20,6 +20,13 @@
 ```
 top-down-bottleneck
 ├── SKILL.md                          # 主Skill文件
+├── scripts/                          # 一键采集脚本
+│   ├── phase1-static-info.sh         # 无参数
+│   ├── phase2.1-global-bottleneck.sh # 无参数
+│   ├── phase2.2-top-processes.sh     # 无参数
+│   ├── phase3.1-hotspot-function.sh  # <PID>
+│   ├── phase3.2-syscall-analysis.sh  # <PID>
+│   └── phase4-microarch.sh           # <PID>
 ├── Phase 1: 系统环境静态信息采集 (硬件规格/软件版本/内核启动参数)
 ├── Phase 2: 主负载识别与瓶颈分析
 │   ├── Step 2.1: 全局资源瓶颈识别 (CPU/Memory/IO/Network)
@@ -57,12 +64,14 @@ top-down-bottleneck
 │  ├→ Step 2.1: 全局资源瓶颈识别                              │
 │  └→ Step 2.2: 高资源消耗进程识别                            │
 │                                                              │
-│  Phase 3: 热点函数与系统调用分析                             │
-│  ├→ Step 3.1: 热点函数分析 (perf)                           │
-│  └→ Step 3.2: 系统调用分析 (strace)                         │
-│                                                              │
-│  Phase 4: 微架构瓶颈分析                                     │
-│  └→ PMU events: cache/branch/pipeline/NUMA                  │
+│  Phase 3: 热点函数与系统调用分析 ⚠️重量级 - 必须串行     │
+│  ├→ Step 3.1: 热点函数分析 (perf)                        │
+│  │   完成后 →                                             │
+│  └→ Step 3.2: 系统调用分析 (strace)                      │
+│      完成后 →                                             │
+│                                                           │
+│  Phase 4: 微架构瓶颈分析 ⚠️重量级 - 必须串行              │
+│  └→ PMU events: cache → branch/pipeline → NUMA (依次执行) │
 │                                                              │
 │  Phase 5: 基于证据的瓶颈分析                                 │
 │  └→ 瓶颈映射 + 严重程度 + 优化建议                          │
@@ -176,12 +185,12 @@ flowchart TD
     D2 --> E
     D3 --> E
     D4 --> E
-    E --> F[Phase 3: 热点与系统调用分析]
-    F --> F1[Step 3.1: 热点函数]
-    F --> F2[Step 3.2: 系统调用]
-    F1 --> G[Phase 4: 微架构分析]
-    F2 --> G
-    G --> H[Phase 5: 证据汇总与瓶颈报告]
+    E --> F1[Step 3.1: 热点函数 ⚠️重量级]
+    F1 -->|完成后| F2[Step 3.2: 系统调用 ⚠️重量级]
+    F2 -->|完成后| G1[Phase 4: Cache分析 ⚠️重量级]
+    G1 -->|完成后| G2[Phase 4: Branch/Pipeline分析 ⚠️重量级]
+    G2 -->|完成后| G3[Phase 4: NUMA分析 ⚠️重量级]
+    G3 --> H[Phase 5: 证据汇总与瓶颈报告]
 ```
 
 ### 瓶颈判定流程
@@ -198,6 +207,12 @@ flowchart TD
     H -->|是| I[IO饱和瓶颈]
     H -->|否| J[继续其他指标]
 ```
+
+## 重量级命令约束
+
+**重量级命令**（`perf record`, `perf top`, `perf stat`, `strace`）会attach到目标进程并改变其运行时行为。必须串行运行，等前一组命令完成后才能启动下一组，不得与任何其他采集分析命令同时运行。
+
+---
 
 ## 核心业务流程
 
