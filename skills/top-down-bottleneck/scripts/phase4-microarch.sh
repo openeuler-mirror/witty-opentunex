@@ -29,33 +29,33 @@ echo ""
 # ---- CPU Cache Analysis ----
 echo "========== CPU Cache Analysis =========="
 
-echo "--- Cache Miss Rates (30s) ---"
+echo "--- Cache Miss Rates (15s) ---"
 perf stat -e cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses -p "$PID" -- sleep "$DUR"
 
 echo ""
-echo "--- TLB Miss Statistics (30s, tolerate if unavailable) ---"
+echo "--- TLB Miss Statistics (15s, tolerate if unavailable) ---"
 perf stat -e dTLB-load-misses,iTLB-load-misses -p "$PID" -- sleep "$DUR" || true
 
 # ---- Branch Prediction and Pipeline Analysis ----
 echo ""
 echo "========== Branch Prediction and Pipeline Analysis =========="
 
-echo "--- Branch Misprediction Rate (30s, tolerate if unavailable) ---"
+echo "--- Branch Misprediction Rate (15s, tolerate if unavailable) ---"
 perf stat -e branches,branch-misses -p "$PID" -- sleep "$DUR" || true
 
 echo ""
-echo "--- Pipeline Stall Analysis (30s) ---"
+echo "--- Pipeline Stall Analysis (15s) ---"
 perf stat -e stalled-cycles-frontend,stalled-cycles-backend,cycles,instructions -p "$PID" -- sleep "$DUR"
 
 # ---- Top-Down Microarchitecture Analysis ----
 echo ""
 echo "========== Top-Down Microarchitecture Analysis =========="
 
-echo "--- Portable Pipeline Metrics (30s) ---"
+echo "--- Portable Pipeline Metrics (15s) ---"
 perf stat -e cycles,instructions -p "$PID" -- sleep "$DUR"
 
 echo ""
-echo "--- Intel uops Metrics (30s, tolerate if unavailable) ---"
+echo "--- Intel uops Metrics (15s, tolerate if unavailable) ---"
 perf stat -e uops_executed,uops_retired -p "$PID" -- sleep "$DUR" || true
 
 echo ""
@@ -66,7 +66,7 @@ toplev -p "$PID" --sleep "$DUR" || true
 echo ""
 echo "========== Memory Bandwidth and NUMA =========="
 
-echo "--- NUMA Locality (30s, tolerate if unavailable) ---"
+echo "--- NUMA Locality (15s, tolerate if unavailable) ---"
 perf stat -e node_loads,node_stores,local_loads,remote_loads -p "$PID" -- sleep "$DUR" || true
 
 echo ""

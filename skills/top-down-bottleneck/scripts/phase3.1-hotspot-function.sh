@@ -24,18 +24,19 @@ echo "Phase 3.1: Hotspot Function Analysis (PID=$PID)"
 echo "============================================================"
 echo ""
 
-echo "--- perf record (30s sampling) ---"
-perf record -p "$PID" -g -o /tmp/perf_phase3_1.data -- sleep 30
+echo "--- perf record (15s sampling) ---"
+perf record -p "$PID" -g -o /tmp/perf_phase3_1.data -- sleep 15
 
 echo ""
 echo "--- perf report ---"
 perf report -i /tmp/perf_phase3_1.data --stdio --percent-limit 1
 
 echo ""
-echo "--- perf record for flamegraph (99Hz, 30s) ---"
-perf record -F 99 -p "$PID" -g -o /tmp/perf_phase3_1_fg.data -- sleep 30
+echo "--- perf record for flamegraph (59Hz, 15s) ---"
+perf record -F 59 -p "$PID" -g -o /tmp/perf_phase3_1_fg.data -- sleep 15
 echo ""
 echo "--- Generating flamegraph ---"
+(which stackcollapse-perf.pl 2>/dev/null && which flamegraph.pl 2>/dev/null ) && \
 perf script -i /tmp/perf_phase3_1_fg.data | stackcollapse-perf.pl 2>/dev/null | flamegraph.pl > /tmp/flamegraph_phase3_1.svg 2>/dev/null \
     && echo "Flamegraph saved to /tmp/flamegraph_phase3_1.svg" \
     || echo "Flamegraph generation skipped (stackcollapse-perf.pl / flamegraph.pl not installed)"

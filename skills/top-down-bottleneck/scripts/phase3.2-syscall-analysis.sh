@@ -27,7 +27,7 @@ echo "============================================================"
 echo ""
 
 echo "--- strace -c: Syscall summary with counts and errors ---"
-strace -p "$PID" -c -f
+timeout 15 strace -p "$PID" -c -f
 
 echo ""
 echo "============================================================"

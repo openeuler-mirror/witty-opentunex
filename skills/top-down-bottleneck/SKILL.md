@@ -13,20 +13,21 @@ This skill performs a five-phase analysis:
 (5) evidence-based bottleneck analysis with severity mapping.
 The skill focuses exclusively on OS-level resource bottlenecks. It does NOT collect, analyze, or provide recommendations for application-layer data (database queries, JVM heap, application logs, etc.).
 The skill supports iterative refinement until sufficient analysis is achieved.
+Requires root permission for collecting related info.
 
 ---
 
 ## Client Connection and Command Execution
 
-[1] if current <agent> is not opentunex-assistant, Load the `remote-execution` skill for standardized SSH connection and command execution.
+[1] if current <agent> is not opentunex-assistant agent, Load the `remote-execution` skill for standardized SSH connection and command execution.
 
-[2] if current <agent> is opentunex-assistant, Keep the following rule for command execution:  **IMPORTANT** Always output commands which need execution to the **USER**, and ask **USER** for execution results, never execute command automatically by <agent> yourself.
+[2] if current <agent> is opentunex-assistant agent, Keep the following rule for command execution:  **IMPORTANT** Always output commands which need execution to the **USER**, and ask **USER** for execution results, never execute command automatically by <agent> yourself.
 
 ---
 
 ## Heavyweight Command Constraints (CRITICAL)
 
-**Heavyweight commands** (`perf record`, `perf top`, `perf stat`, `strace`) attach to the target process and alter its runtime behavior. They MUST run sequentially — wait for the current command to complete before starting the next. Do NOT run concurrently with any other collection or analysis command.
+**Heavyweight commands** (`perf record`, `perf top`, `perf stat`, `strace`) attach to the target process and alter its runtime behavior. They MUST run sequentially — wait for the previous command to complete before running. Do NOT run concurrently with any other collection or analysis command.
 
 ---
 
@@ -38,7 +39,7 @@ reference:basic-system-info
 
 **Output**: Static system profile: hardware specs (CPU model/core count/NUMA, memory size, disk types, NIC models), software versions (OS, kernel, tools), kernel boot parameters and key sysctl settings.
 
-**One-command collection**: To run all Phase 1 commands in a single script, use `scripts/phase1-static-info.sh`. No parameters required. Requires root for `dmidecode`/`ethtool`.
+**For opentunex-assistant agent(dialog mode)**: provide single script and usage like `scripts/phase1-static-info.sh`. No parameters required.
 
 ---
 
@@ -122,7 +123,7 @@ echo "TIME_WAIT connections:" && ss -tan state time-wait | wc -l
 
 **Output**: Identify which resource(s) are under highest pressure with specific evidence (e.g., "CPU bottleneck: %iowait consistently 25-35% across 5 samples").
 
-**One-command collection**: To run all Phase 2.1 commands sequentially in a single script, use `scripts/phase2.1-global-bottleneck.sh`. No parameters required. All commands are lightweight. Runtime ~30 seconds.
+**For opentunex-assistant agent(dialog mode)**: provide single script and usage like `scripts/phase2.1-global-bottleneck.sh`. No parameters required. All commands are lightweight.
 
 ---
 
@@ -138,14 +139,16 @@ ps aux --sort=-%cpu | head -20
 # Top 20 memory processes (Sorted - header preserved by ps)
 ps aux --sort=-%mem | head -20
 
-# Top 20 I/O processes by iotop (requires root, 5-second sampling)
+# Top 20 I/O processes by iotop (5-second sampling)
 { echo "    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND"; iotop -oP -b -n 5 -d 1 | grep -E "^\s*[0-9]" | head -20; } || true
 
 # Top 20 I/O processes by pidstat (Sorted by kB_wr/s col 5 - header + top 20)
 { echo "      UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s iodelay  Command"; pidstat -d 1 5 | grep 'Average' | grep -v "UID" | sort -k5 -rn | head -20; }
 ```
 
-**One-command collection**: To run all Phase 2.2 commands in a single script, use `scripts/phase2.2-top-processes.sh`. No parameters required. `iotop` requires root.
+**Output**: Top processes consuming cpu/mem/io resource.
+
+**For opentunex-assistant agent(dialog mode)**: provide single script and usage like `scripts/phase2.2-top-processes.sh`. No parameters required.
 
 ---
 
@@ -160,17 +163,19 @@ ps aux --sort=-%mem | head -20
 **Important**: use `remote-execution` skill for remote perf command.
 
 ```bash
-# Record performance data for target process (30 seconds)
-perf record -p <PID> -g -- sleep 30
+# Record performance data for target process (15 seconds)
+perf record -p <PID> -g -- sleep 15
+# check perf.data size, if larger than 500MB, reduce sampling time to 5 seconds and resample
+
 # Analyze recorded data (only show symbols with overhead >= 1%)
 perf report --stdio --percent-limit 1
 # Real-time sampling
-perf top -p <PID>
+timeout 15 perf top -p <PID>
 # Generate flamegraph (requires flamegraph tools, tolerate if not installed)
-perf record -F 99 -p <PID> -g -- sleep 30 && perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg || true
+perf record -F 59 -p <PID> -g -- sleep 15 && perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg || true
 ```
 
-**One-command collection**: To run all Phase 3.1 commands sequentially in a single script, use `scripts/phase3.1-hotspot-function.sh <PID>`. Parameter: `PID` — target process ID (required). Requires root. Runtime ~60-90 seconds.
+**For opentunex-assistant agent(dialog mode)**: provide single script and usage like `scripts/phase3.1-hotspot-function.sh <PID>`. Parameter: `PID` — target process ID (required).
 
 ### Step 3.2: Syscall Analysis
 
@@ -179,10 +184,10 @@ perf record -F 99 -p <PID> -g -- sleep 30 && perf script | stackcollapse-perf.pl
 **syscall analysis**:
 ```bash
 # Trace system calls (summary with counts, latency, errors)
-strace -p <PID> -c -f
+timeout 15 strace -p <PID> -c -f
 ```
 
-**One-command collection**: To run all Phase 3.2 commands in a single script, use `scripts/phase3.2-syscall-analysis.sh <PID>`. Parameter: `PID` — target process ID (required). Requires root. ⚠️ Must run AFTER Phase 3.1 completes.
+**For opentunex-assistant agent(dialog mode)**: provide single script and usage like `scripts/phase3.2-syscall-analysis.sh <PID>`. Parameter: `PID` — target process ID (required). Must run AFTER Phase 3.1 completes.
 
 **Key Metrics to Analyze**:
 - Top hotspot functions by CPU time (perf report)
@@ -196,7 +201,7 @@ strace -p <PID> -c -f
 - High context switch rate (cs/s > 50000 for single process)
 - Excessive system call frequency (> 10000 syscalls/sec)
 
-**Output**: For each top process, record: PID, name, top 5 hot functions, total CPU%, main system calls, identified bottlenecks with evidence. **Both Hot Function Analysis and System Call Analysis results MUST be included in the Phase 3 summary — they are not optional.**
+**Output**: For each top process, record: PID, name, top 5 hot functions, total CPU%, main system calls, identified bottlenecks with evidence.
 
 ---
 
@@ -248,7 +253,7 @@ perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 1
 - NUMA locality ratios
 - Identified microarchitecture bottlenecks (e.g., "L1 cache miss rate 15% - high memory access density at OS level")
 
-**One-command collection**: To run all Phase 4 commands sequentially in a single script, use `scripts/phase4-microarch.sh <PID>`. Parameter: `PID` — target process ID (required). Requires root. Runtime ~1.5-2 minutes. ⚠️ Must run AFTER Phase 3 completes. All `perf stat` groups are serialized within the script.
+**For opentunex-assistant agent(dialog mode)**: provide single script and usage like like `scripts/phase4-microarch.sh <PID>`. Parameter: `PID` — target process ID (required). Must run AFTER Phase 3 completes.
 
 ---
 
@@ -324,6 +329,6 @@ reference:output-template
 
 ## Operational Notes
 
+- All phases result should be included in analysis summary.
 - All analysis must be specific and evidence-based; maintain rigor and professionalism.
-- When using perf for microarchitecture analysis, ensure appropriate sampling intervals (15-30 seconds) to avoid skewing metrics.
 - **Scope Constraint — OS Level Only**: This skill analyzes ONLY OS-level information and bottlenecks. Do NOT collect, interpret, or provide recommendations based on application-layer data (e.g., MySQL query plans, PostgreSQL EXPLAIN output, Java heap/Garbage Collection logs, Redis command traces, application configuration files, application business logic). If application-layer issues are detected (e.g., a process spending excessive time in application code), describe it at the OS level (e.g., "process spending 80% CPU time in user space") without diving into application internals.
