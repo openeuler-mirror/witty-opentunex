@@ -23,15 +23,10 @@ skill:remote-execution
 
 ## Phase 1: Environment Preparation
 
-### Step 1.1: System Environment Check
+### Step 1.1: Scheduler Tracing Prerequisites
 
 ```bash
-# Check kernel version (need >= 3.10 for better sched support)
-uname -r
-# Check perf availability (REQUIRE: same with kernel version)
-perf --version
-
-# Check if tracing is enabled
+# Check and enable scheduler tracing prerequisites
 cat /proc/sys/kernel/sched_schedstats
 cat /proc/sys/kernel/perf_event_paranoid
 ```
@@ -42,21 +37,6 @@ echo 1 > /proc/sys/kernel/sched_schedstats
 echo 0 > /proc/sys/kernel/perf_event_paranoid
 ```
 
-### Step 1.2: CPU Topology Analysis
-
-```bash
-# CPU count and topology
-lscpu
-
-# CPU core layout
-cat /proc/cpuinfo | grep -E "processor|physical id|core id"
-
-# NUMA information
-numactl --hardware
-```
-
-**Output**: Save CPU topology information for correlation analysis.
-
 
 ---
 
@@ -66,17 +46,11 @@ numactl --hardware
 
 Trace duration: 15 seconds by default, or use user-input duration.
 
-### Step 2.1: Identify Target Process
+### Step 2.1: Target Process Scheduling Attributes
 
 **User Input Required**: Get target process information from context or user, e.g. redis/nginx/mysql.
 
 ```bash
-# Find process by name
-ps aux | grep -E "<target_name>" | grep -v grep
-
-# Get detailed process info
-pidstat -p <PID> -u -r -d -w 1 5
-
 # Check process threads
 ps -T -p <PID>
 
@@ -88,8 +62,8 @@ chrt -p <PID>
 **Output format**:
 ```markdown
 ### Target Process Information
-| PID | Name | PPID | Threads | Priority | Nice | Affinity |
-|-----|------|------|---------|----------|------|----------|
+| PID | Name | Threads | Priority | Nice | Affinity |
+|-----|------|---------|----------|------|----------|
 ```
 
 ### Step 2.2: Perf Sched Recording

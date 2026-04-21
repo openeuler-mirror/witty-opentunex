@@ -257,9 +257,91 @@ perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 1
 
 ---
 
-## Phase 5: Evidence-Based Bottleneck Analysis
+## Phase 5: Deep-Dive Analysis via Specialized Skills
 
-**Requirement**: Every bottleneck claim MUST be backed by specific evidence from Phases 1-4. No vague or speculative statements.
+Based on the bottleneck categories identified in Phase 5, invoke the corresponding specialized skills for deep-dive analysis.
+
+### Step 5.1: Determine Specialized Skill Mapping
+
+Map identified bottleneck types to specialized skills:
+
+| Identified Bottleneck Type | Specialized Skill to Invoke |
+|---------------------------|----------------------------|
+| Disk I/O saturation (%util > 90%, await > 20ms) | **io-bottleneck** |
+| CPU iowait elevated (%iowait > 20%) | **io-bottleneck** |
+| Memory pressure (SwapUsed > 50%, majflt/s > 1000) | **mem-bottleneck** |
+| NUMA imbalance (remote/local > 2:1) | **mem-bottleneck** |
+| Memory fragmentation (Slab > 30%) | **mem-bottleneck** |
+| Network retransmission (Retrans > 2%) | **net-bottleneck** |
+| Connection exhaustion (TIME_WAIT > 5000) | **net-bottleneck** |
+| High context switches with futex wait | **lock-bottleneck** |
+| Processes in D/S state with lock wchan | **lock-bottleneck** |
+| Scheduling latency outliers (max delay > 100ms) | **schedule-trace-analysis** |
+| CPU contention (preemption > threshold) | **schedule-trace-analysis** |
+
+### Step 5.2: Invoke Specialized Skills
+
+For each identified bottleneck category with **Critical** or **High** severity, invoke the corresponding skill:
+
+**For I/O Bottlenecks:**
+```bash
+# Invoke io-bottleneck skill
+skill:io-bottleneck
+# Focus areas:
+# - I/O scheduler configuration
+# - Blocked process wait channel analysis
+# - Page cache pressure
+```
+
+**For Memory Bottlenecks:**
+```bash
+# Invoke mem-bottleneck skill
+skill:mem-bottleneck
+# Focus areas:
+# - PSI memory pressure
+# - OOM events and statistics
+# - Slab allocator details
+# - NUMA hit/miss statistics
+# - Vmalloc usage
+```
+
+**For Network Bottlenecks:**
+```bash
+# Invoke net-bottleneck skill
+skill:net-bottleneck
+# Focus areas:
+# - Socket memory usage
+# - Loopback latency test
+```
+
+**For Lock Contention:**
+```bash
+# Invoke lock-bottleneck skill
+skill:lock-bottleneck
+# Focus areas:
+# - Futex syscall tracing
+# - /proc/PID/wchan analysis
+# - Kernel lock statistics
+# - File lock status
+# - Softirq SCHED activity
+```
+
+**For Scheduling Issues:**
+```bash
+# Invoke schedule-trace-analysis skill
+skill:schedule-trace-analysis
+# Focus areas:
+# - Scheduling latency distribution (P50/P90/P95/P99)
+# - Preemptor identification and impact
+# - CPU affinity and priority
+# - perf sched event analysis
+```
+
+---
+
+## Phase 6: Evidence-Based Bottleneck Analysis
+
+**Requirement**: Every bottleneck claim MUST be backed by specific evidence from Phases 1-5. No vague or speculative statements.
 
 **Bottleneck categories and evidence mapping**:
 
@@ -294,6 +376,7 @@ perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 1
 - [ ] Phase 2.2 top process identification (ps, iotop, pidstat)
 - [ ] Phase 3 hotspot function and syscall analysis (perf, strace)
 - [ ] Phase 4 microarchitecture PMU events (perf stat)
+- [ ] Phase 5 deep-dive analysis via specialized skills (if bottleneck type identified)
 
 **Output format for each bottleneck**:
 ```
@@ -317,7 +400,8 @@ The skill allows repeated cycles to narrow the analysis scope:
 - **When to iterate**: Bottleneck(s) not yet identified with sufficient evidence, or next steps are unclear.
 - **How to iterate**: Each cycle narrows focus (e.g., specific container, port, device). Re-run Phase 1 if system state may have changed; otherwise reuse existing data and deepen analysis.
 - **Important — Complete All Phases Before Concluding**: Do NOT stop analysis early once an initial bottleneck is found. All phases (Phase 1 through Phase 5) must be fully executed and reported before concluding. Early termination prevents discovering secondary bottlenecks that may be equally or more impactful. The final report is only complete when every section of the Output Template has been filled with actual data.
-- **Stop when**: All phases are fully executed, all evidence collected, all bottleneck categories mapped, and the user confirms the report is complete.
+  - **Phase 5 Completion Requirement**: If any Critical or High severity bottlenecks are identified in Phase 1-4, Phase 5 deep-dive analysis via specialized skills MUST be completed before finalizing the report.
+- **Stop when**: All phases are fully executed, all evidence collected, all bottleneck categories mapped, Phase 5 deep-dive completed (if triggered), and the user confirms the report is complete.
 
 ---
 
