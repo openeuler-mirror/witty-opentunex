@@ -43,22 +43,12 @@ skill:remote-execution
 
 ## Phase 1: Environment Preparation
 
-### Step 1.1: System Environment Check
+### Step 1.1: Lock Tracing Prerequisites
 
 ```bash
-# Check kernel version (need >= 2.6.25 for futex, >= 3.14 for better lock stats)
-uname -r
-
-# Check perf availability
-perf --version
-
-# Check perf_event_paranoid (must be <= 2 for most tracepoints)
+# Check and enable lock tracing prerequisites
 cat /proc/sys/kernel/perf_event_paranoid
-
-# Check if lock tracing is available
 cat /proc/sys/kernel/lock_stat 2>/dev/null || echo "lock_stat not available"
-
-# Check scheduler stats
 cat /proc/sys/kernel/sched_schedstats 2>/dev/null
 ```
 
@@ -68,146 +58,75 @@ echo 1 > /proc/sys/kernel/sched_schedstats
 echo 0 > /proc/sys/kernel/perf_event_paranoid
 ```
 
-### Step 1.2: CPU Topology Analysis
-
-```bash
-# CPU count and topology
-lscpu
-
-# NUMA information
-numactl --hardware
-```
-
 ---
 
 ## Phase 2: Lock Trace Data Collection
 
-### Step 2.1: Identify Target Process
+### Step 2.1: Target Process Deep Inspection
 
-**System Auto-Discovery**: List top CPU consuming processes for user selection.
-
-```bash
-# List top 3 CPU-consuming processes
-ps -eo pid,comm,%cpu,%mem,state,wchan:32 | sort -k3 -rn | head -10
-
-# Output Example:
-#   PID COMMAND         %CPU  %MEM S WCHAN
-# 12345 redis-server    25.3  12.5 S futex_wait_queue_meh
-# 12346 redis-server    24.8  12.5 S futex_wait_queue_meh
-#  2345 mysqld          15.2   8.1 S schedule_timeout
-#  3456 nginx            8.3   2.1 R worker_cond_wait
-#  4567 node             5.6   3.2 S ep_poll
-#  5678 java             4.2  15.3 S futex_wait
-#  6789 python           2.1   1.2 S wait_for_page_io
-#  7890 docker           1.8   0.9 S-
-#  8901 systemd           0.5   0.1 S ep_poll
-#  9012 sshd             0.3   0.1 S-
-```
-
-**User Selection Required**: Ask user to confirm target process or specify a different PID.
+**User Input Required**: Get target process information from context or user, e.g. redis/nginx/mysql.
 
 ```bash
-# If user confirms PID 12345 (redis-server), get detailed info:
-pidstat -p 12345 -u -r -d -w 1 5
-
-# Output Example:
-# 09:15:32      PID   %usr %system %guest   %wait   %CPU   CPU  Command
-# 09:15:33   12345     20.1    5.2    0.0    3.4   25.3     0  redis-server
-# 09:15:33   12345     19.8    5.0    0.0    3.2   24.8     1  redis-server
-# 09:15:33   12345     20.5    4.8    0.0    3.5   25.3     2  redis-server
-
 # Check process threads
-ps -T -p 12345
+ps -T -p <PID>
 
 # Output Example:
 #     PID    TID  CMD
 #  12345  12345  redis-server
 #  12345  12346  redis-server
 #  12345  12347  redis-server
-#  ...
 
-# Check process state (look for D state = uninterruptible sleep, S = interruptible sleep)
-cat /proc/12345/status | grep -E "State|Threads|VmRSS"
-
-# Output Example:
-# State:  S (sleeping)
-# Threads:        16
-# VmRSS:    245678 kB
+# Check process state and resource info
+cat /proc/<PID>/status | grep -E "State|Threads|VmRSS"
 
 # Check what the process is waiting on (wchan)
-cat /proc/12345/wchan
-# Output: futex_wait_queue_meh
+cat /proc/<PID>/wchan
 
-cat /proc/12345/stat | awk '{print $3}'
-# Output: S
-```
+# Check process state from stat
+cat /proc/<PID>/stat | awk '{print $3}'
 
-**User Interaction**:
-```
-Top 3 CPU-consuming processes:
-1. PID 12345: redis-server (25.3% CPU, 16 threads, state S - waiting on futex)
-2. PID 2345: mysqld (15.2% CPU, 32 threads, state S - schedule_timeout)
-3. PID 3456: nginx (8.3% CPU, 8 threads, state R - worker_cond_wait)
-
-Please select target process:
-- Enter 1, 2, or 3 to select from above
-- Or enter a specific PID to analyze
-- Or enter a process name to search (e.g., redis, nginx, mysql)
+# Check file descriptor count
+cat /proc/<PID>/fd 2>/dev/null | wc -l
 ```
 
 **Output format**:
 ```markdown
 ### Target Process Information
-| PID | Name | PPID | Threads | State | Wchan | CPU% | VmRSS |
-|-----|------|------|---------|-------|-------|------|-------|
-| 12345 | redis-server | 1 | 16 | S | futex_wait_queue_meh | 25.3 | 245MB |
+| PID | Name | Threads | State | Wchan | FD Count |
+|-----|------|---------|-------|-------|----------|
+| <PID> | <Name> | <N> | <S/D/R> | <wchan> | <N> |
 ```
 
-### Step 2.2: System-Wide Lock Activity Baseline
+### Step 2.2: Softirq Analysis
 
 ```bash
-# vmstat - Check blocked processes (column 'b' shows blocked processes)
-vmstat 1 10
+# Check for excessive softirq time - SCHED softirq indicates lock activity
+cat /proc/softirqs
 
 # Output Example:
-# procs -----------memory---------- ---swap-- -----io---- -system-- --------cpu--------
-#  r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
-#  2  0      0 12345678  123456  789012    0    0    12    34  567  890  5  2 90  3  0
-#  1  1      0 12345678  123456  789012    0    0    10    28  543  876  4  2 91  3  0
-#  0  2      0 12345678  123456  789012    0    0    15    45  598  920  3  2 92  3  0
+#                     CPU0       CPU1       CPU2       CPU3
+#           HI:          0          0          0          0
+#       TIMER:    1023456    1034567    1023567    1034567
+#       NET_TX:       234        123        345        234
+#       NET_RX:     56789      45678      34567      67890
+#       BLOCK:       1234       2345       3456       4567
+#   IRQ_POLL:          0          0          0          0
+#     TASKLET:      1234       2345       3456       4567
+#       SCHED:     345678     234567     456789     345678
+#       HRTIMER:      234        345        456        567
+#         RCU:     567890     456789     678901     567890
 #
-# Key columns:
-# - r: runnable processes (should be < CPU count normally)
-# - b: blocked processes (THIS IS KEY - high values indicate lock blocking)
-# - in: interrupts
-# - cs: context switches
-
-# pidstat -w - Check per-process context switches and waiting
-pidstat -w 1 10
-
-# Output Example:
-# 09:15:32      PID   cswch/s nvcswch/s  Command
-# 09:15:33     12345   1523.00      0.00  redis-server
-# 09:15:33     12346   1489.00      0.00  redis-server
-# 09:15:33        12     45.00      0.00  kworker/3:1H
-# 09:15:33         1     12.00      0.00  systemd
-#
-# cswch/s = voluntary context switches (includes lock waits)
-# nvcswch/s = non-voluntary context switches (preemption)
+# High SCHED softirq = lock activity
 ```
 
-### Step 2.3: Futex Activity Analysis
+### Step 2.3: Futex Activity Recording
 
 ```bash
 # Record futex syscalls for target process
-# Using perf to trace futex enter/exit
-perf record -a -e syscalls:sys_enter_futex -e syscalls:sys_exit_futex -o /tmp/futex.data -- sleep ${DURATION:-30} &
+perf record -a -e syscalls:sys_enter_futex -e syscalls:sys_exit_futex -o /tmp/futex.data -- sleep ${DURATION:-30}
 
-# Alternative: strace futex calls (overhead, use carefully)
-strace -c -f -p <PID> 2>&1 | head -50
-
-# Check futex wait queue lengths during peak
-cat /proc/<PID>/fd - 2>/dev/null | wc -l
+# Check futex wake counter if available
+cat /proc/sys/kernel/futex_wake_mac 2>/dev/null || echo "not available"
 ```
 
 **Output Example for futex analysis**:
@@ -221,49 +140,20 @@ cat /proc/<PID>/fd - 2>/dev/null | wc -l
 | Avg wait duration | | >100ms | |
 ```
 
-### Step 2.4: Context Switch and Scheduling Correlation
+### Step 2.4: Scheduling Event Recording
 
 ```bash
-# Record scheduling with lock events
+# Record scheduling events with futex correlation
 perf record -a -e sched:sched_switch -e sched:sched_wakeup -e syscalls:sys_enter_futex -e syscalls:sys_exit_futex -- sleep ${DURATION:-30}
-
-# Check run queue length over time
-vmstat 1 30
-
-# mpstat - Check per-CPU utilization
-mpstat -P ALL 1 10
-
-# Output Example:
-# 10:30:45     CPU    %usr   %nice    %sys %iowait    %irq   %soft  %steal  %guest  %gnice   %idle
-# 10:30:46       0    15.23    0.00    5.67    2.34    1.23    8.90    0.00    0.00    0.00   66.63
-# 10:30:46       1    45.12    0.00   12.34    0.00    0.56    4.23    0.00    0.00    0.00   37.75
-# 10:30:46       2    78.90    0.00   15.67    0.00    0.89    3.45    0.00    0.00    0.00    1.09
-# 10:30:46       3    12.34    0.00    3.21    8.90    0.45    2.12    0.00    0.00    0.00   72.98
-#
-# CPU 2 at 94.57% utilization (usr+sys) - check if lock contention
 ```
 
 ---
 
 ## Phase 3: Lock Bottleneck Analysis
 
-### Step 3.1: Blocked Process Analysis
+### Step 3.1: Wait Channel Analysis
 
 ```bash
-# Identify processes in blocked state (D = uninterruptible, S = interruptible)
-ps -eo pid,comm,state,wchan:32,cmd | grep -E "^[0-9]+.*[DS]"
-
-# Output Example:
-#   PID COMMAND         S WCHAN                COMMAND
-# 12345 redis-server    S futex_wait_queue_meh [redis-server]
-# 12346 redis-server    S futex_wait_queue_meh [redis-server]
-#  2345 mysqld          D schedule_timeout      [mysqld]
-#
-# Key:
-# - S = interruptible sleep (waiting on lock, can be interrupted)
-# - D = uninterruptible sleep (usually I/O, but can be lock)
-# - WCHAN shows what kernel function they're waiting in
-
 # Count blocked processes per wait channel
 ps -eo state,wchan:32 | awk '/^[DS]$/ {print $2}' | sort | uniq -c | sort -rn | head -20
 
@@ -334,40 +224,14 @@ perf sched script | grep -B 1 "sys_enter_futex.*$TARGET_PID" | grep "prev_state=
 # 15234
 ```
 
-### Step 3.4: Spinlock Contention Detection
+### Step 3.4: Kernel Lock Contention Detection
 
 ```bash
-# Check for spinlock-related CPU spinning
-# High sys% without high user% = possible spinlock contention
-mpstat 1 5
+# Check kernel lock statistics if available
+cat /proc/lock_stat 2>/dev/null | head -50
 
-# Output Example:
-# 10:30:45     CPU    %usr   %nice    %sys %iowait    %irq   %soft  %steal  %guest  %gnice   %idle
-# Average:      all   25.45    0.00   35.67    1.23    2.34    8.90    0.00    0.00    0.00   26.41
-#
-# Analysis:
-# - sys% (35.67%) is much higher than usr% (25.45%)
-# - soft% (8.90%) indicates softirq processing
-# - Could indicate kernel lock contention
-
-# Check for excessive softirq time (soft %)
-# softirq can indicate lock handling overhead
-cat /proc/softirqs
-
-# Output Example:
-#                     CPU0       CPU1       CPU2       CPU3
-#           HI:          0          0          0          0
-#       TIMER:    1023456    1034567    1023567    1034567
-#       NET_TX:       234        123        345        234
-#       NET_RX:     56789      45678      34567      67890
-#       BLOCK:       1234       2345       3456       4567
-#   IRQ_POLL:          0          0          0          0
-#     TASKLET:      1234       2345       3456       4567
-#       SCHED:     345678     234567     456789     345678
-#       HRTIMER:      234        345        456        567
-#         RCU:     567890     456789     678901     567890
-#
-# High SCHED softirq = lock activity
+# Check file lock activity
+cat /proc/locks | awk '$2=="FLOCK" || $2=="POSIX"' | head -20
 ```
 
 ---
@@ -555,14 +419,14 @@ fi
 
 | Command | Purpose | Output Example |
 |---------|---------|----------------|
-| `vmstat 1 10` | System-wide blocked process count | `b: 2` (blocked processes) |
-| `pidstat -w 1 5` | Per-process context switches | `cswch/s: 1523` |
-| `ps -eo state,wchan` | Processes waiting on locks | `S futex_wait_queue_meh` |
+| `cat /proc/<PID>/wchan` | Process wait channel | `futex_wait_queue_meh` |
+| `cat /proc/<PID>/status` | Process state and threads | `State: S (sleeping)` |
+| `ps -eo state,wchan` | System-wide wait channels | `S futex_wait_queue_meh` |
 | `perf sched timehist` | Wait time per scheduling event | `wait time: 5.678ms` |
 | `perf script -i /tmp/futex.data` | Futex syscall trace | `sys_enter_futex: FUTEX_WAIT` |
-| `mpstat 1 5` | Per-CPU utilization | `sys%: 35.67%` |
+| `cat /proc/softirqs` | Softirq frequency (check SCHED) | `SCHED: 345678` |
+| `cat /proc/lock_stat` | Kernel lock statistics | Lock contention details |
 | `cat /proc/locks` | Current file locks | `FLOCK ADVISORY WRITE` |
-| `cat /proc/softirqs` | Softirq frequency | `SCHED: 345678` |
 
 ---
 

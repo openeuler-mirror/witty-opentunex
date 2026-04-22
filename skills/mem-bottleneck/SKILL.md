@@ -25,114 +25,56 @@ skill:remote-execution
 
 ## Analysis Steps
 
-### Step 1: Environment Check
-
-Execute on remote host via `ssh -q -tt root@<IP>`:
+### Step 1: PSI Memory Pressure Analysis
 
 ```bash
-uname -r && echo "---" && numactl --hardware 2>/dev/null | head -10 && echo "---" && cat /proc/meminfo | head -10
+echo "=== Memory Pressure Level (PSI) ===" && if [ -f /proc/pressure/mem ]; then cat /proc/pressure/mem; else echo "pressure not available"; fi
 ```
 
-### Step 2: Collect Memory Metrics (15 seconds)
-
-Run memory metrics collection inline:
+### Step 2: OOM Event Analysis
 
 ```bash
-echo "=== vmstat (1 second interval, 15 samples) ===" && vmstat 1 15
-```
-
-```bash
-echo "=== sar -r memory stats ===" && sar -r 1 15
-```
-
-```bash
-echo "=== sar -B page fault stats ===" && sar -B 1 15
-```
-
-```bash
-echo "=== sar -w context switch stats ===" && sar -w 1 15
-```
-
-### Step 3: Memory Pressure Analysis
-
-```bash
-echo "=== Memory Pressure Level ===" && if [ -f /proc/pressure/mem ]; then cat /proc/pressure/mem; else echo "pressure not available"; fi
-```
-
-```bash
-echo "=== VM OOM Stats ===" && cat /proc/vmstat | grep -E 'oom|pgfault|pgmajfault'
+echo "=== VM OOM Stats ===" && cat /proc/vmstat | grep -E 'oom|pgmajfault'
 ```
 
 ```bash
 echo "=== Recent OOM Events ===" && dmesg -T 2>/dev/null | grep -iE 'out of memory|oom kill' | tail -10 || journalctl -k 2>/dev/null | grep -iE 'out of memory|oom kill' | tail -10
 ```
 
-### Step 4: Swap and Page Cache Analysis
+### Step 3: Swap Configuration Analysis
 
 ```bash
-echo "=== Swap Status ===" && swapon -s 2>/dev/null || cat /proc/swaps
+echo "=== Swap Configuration ===" && swapon -s 2>/dev/null || cat /proc/swaps
+```
+
+### Step 4: Slab and Vmalloc Analysis
+
+```bash
+echo "=== Slab Memory Detail ===" && cat /proc/slabinfo 2>/dev/null | head -30
 ```
 
 ```bash
-echo "=== Page Cache Pressure ===" && cat /proc/sys/vm/vfs_cache_pressure
+echo "=== Vmalloc Region ===" && cat /proc/meminfo | grep -E "VmallocTotal|VmallocUsed"
+```
+
+### Step 5: NUMA Statistics Analysis
+
+```bash
+echo "=== NUMA Hit/Miss Stats ===" && cat /proc/vmstat | grep -E "numa_hit|numa_miss|numa_foreign|numa_local|numa_other" | head -20
 ```
 
 ```bash
-echo "=== Memory Details ===" && free -h
-```
-
-```bash
-echo "=== Detailed Meminfo ===" && cat /proc/meminfo | grep -E "MemTotal|MemFree|MemAvailable|Buffers|Cached|SReclaimable|Shmem|AnonPages|Active|Inactive"
-```
-
-### Step 5: Slab and Kernel Memory Analysis
-
-```bash
-echo "=== Slab Memory Usage (top consumers) ===" && cat /proc/slabinfo 2>/dev/null | head -30
-```
-
-```bash
-echo "=== Kernel Memory Info ===" && cat /proc/meminfo | grep -E "SUnreclaim|Slab|VmallocTotal|VmallocUsed|CommitLimit|Committed_AS"
-```
-
-### Step 6: NUMA and Cluster Analysis
-
-```bash
-echo "=== NUMA/Cluster Detailed Stats ===" && cat /proc/vmstat | grep -E "numa|pgfault|pgmajfault" | head -20
-```
-
-```bash
-echo "=== NUMA Balance Hints ===" && if [ -f /proc/139/sched ]; then cat /proc/139/sched 2>/dev/null | head -5; else echo "per-process NUMA info not available"; fi
-```
-
-```bash
-echo "=== NUMA Settings ===" && if command -v numactl &>/dev/null; then numactl --hardware; numactl --policy; else echo "numactl not installed"; fi
+echo "=== NUMA Policy ===" && if command -v numactl &>/dev/null; then numactl --policy; else echo "numactl not installed"; fi
 ```
 
 ```bash
 echo "=== Memory Binding ===" && cat /proc/self/status | grep -E "Mems_allowed|Mems_allowed_node"
 ```
 
-### Step 7: CPU and System Activity Analysis
+### Step 6: Per-Process NUMA Hints
 
 ```bash
-echo "=== sar -u CPU stats ===" && sar -u 1 15
-```
-
-```bash
-echo "=== sar -I interrupt stats ===" && sar -I SUM 1 15
-```
-
-```bash
-echo "=== Top Memory Consumer Processes ===" && ps -eo pid,comm,%mem,%cpu,vsz,rss,psr --sort=-%mem | head -15
-```
-
-```bash
-echo "=== Huge Pages ===" && cat /proc/meminfo | grep -i huge
-```
-
-```bash
-echo "=== VM Settings ===" && echo "swappiness:" && cat /proc/sys/vm/swappiness && echo "overcommit:" && cat /proc/sys/vm/overcommit_memory
+echo "=== Per-Process NUMA Info ===" && if [ -f /proc/self/sched ]; then cat /proc/self/sched 2>/dev/null | head -10; else echo "per-process NUMA info not available"; fi
 ```
 
 ---

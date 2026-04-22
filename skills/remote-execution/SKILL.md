@@ -20,7 +20,7 @@ This skill provides standardized client connection and command execution capabil
     3.1 read client auth info (username, password, port) corresponding to the IP in `/opt/opentunex/config/client.yaml`
       - if found, test if SSH connection works with the given auth info
       - if not found or connection test fails, ask user to provide correct auth info, and append auth info to `/opt/opentunex/config/client.yaml`
-    3.2 add local machine's public key to the client to ensure passwordless connection.
+    3.2 generate public key for local machine if not existing, add public key to the client to ensure passwordless connection.
 
 ## Remote Command Execution Guide
 

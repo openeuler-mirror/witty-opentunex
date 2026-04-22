@@ -94,9 +94,52 @@ description: Output template for top-down bottleneck analysis report
 | Backend Stall | stalled-cycles-backend / cycles | [x]% | >20% | [Normal/Elevated/Critical] |
 | NUMA Locality | remote_loads / local_loads | [x]:1 | >2:1 | [Normal/Imbalanced] |
 
-## Phase 5: Evidence-Based Bottleneck Mapping
+## Phase 5: Deep-Dive Analysis via Specialized Skills
 
-### 5.1 Topology Analysis
+**Note**: This phase is **REQUIRED** when Phase 1-4 identifies any Critical or High severity bottlenecks.
+
+### 5.1 Analysis Triggers
+
+| Bottleneck Type | Severity | Invoked Skill |
+|----------------|----------|---------------|
+| [e.g., Disk I/O saturation] | [Critical/High] | [io-bottleneck] |
+| [e.g., Memory pressure] | [Critical/High] | [mem-bottleneck] |
+| ... | ... | ... |
+
+### 5.2 Specialized Skill Results
+
+#### [Skill Name] Results (e.g., io-bottleneck)
+
+**Triggered by**: [Bottleneck category from Phase 1-4]
+**Target Process**: [PID/Name]
+**Analysis Status**: [COMPLETED / SKIPPED]
+
+**Key Metrics**:
+| Metric | Value | Threshold | Status |
+|--------|-------|-----------|--------|
+| [Metric 1] | [Value] | [Threshold] | [Normal/Elevated/Critical] |
+| [Metric 2] | [Value] | [Threshold] | [Normal/Elevated/Critical] |
+| ... | ... | ... | ... |
+
+**Findings**:
+1. [Finding 1 with specific evidence]
+2. [Finding 2 with specific evidence]
+3. ...
+
+**Evidence**:
+```
+[Relevant command output from specialized skill]
+```
+
+#### [Skill Name] Results (e.g., lock-bottleneck)
+
+[Repeat the same structure for each invoked specialized skill]
+
+---
+
+## Phase 6: Evidence-Based Bottleneck Mapping
+
+### 6.1 Topology Analysis
 
 **Process Dependency Topology**:
 - [List all key processes and their relationships: parent → child, I/O wait chains]
@@ -105,7 +148,7 @@ description: Output template for top-down bottleneck analysis report
 **Resource Dependency Graph**:
 - [Map resource → process → OS component: e.g., Disk sda → mysqld → jbd2/dm-0-8]
 
-### 5.2 Evidence-Based Bottleneck Mapping
+### 6.2 Evidence-Based Bottleneck Mapping
 
 | PID | TID | Name | OS Role | Main Bottleneck | Severity | Evidence |
 |-----|-----|------|---------|-----------------|----------|----------|
@@ -113,7 +156,7 @@ description: Output template for top-down bottleneck analysis report
 | [PID] | [TID] | [name] | [kernel/daemon/user] | [bottleneck type] | [Critical/High/Medium/Low] | [metric=value, threshold=..., status=...] |
 | [PID] | [TID] | [name] | [kernel/daemon/user] | [bottleneck type] | [Critical/High/Medium/Low] | [metric=value, threshold=..., status=...] |
 
-### 5.3 Final Bottleneck Summary
+### 6.3 Final Bottleneck Summary
 
 **Primary Bottleneck**: [Resource/Component]
 - Severity: [Critical/High/Medium/Low]
@@ -126,7 +169,7 @@ description: Output template for top-down bottleneck analysis report
 
 **OS-Level Root Cause Hypothesis**: [Single-sentence hypothesis of the OS-level root cause]
 
-### 5.4 OS-Level Preliminary Optimization Recommendations
+### 6.4 OS-Level Preliminary Optimization Recommendations
 
 Based on the bottleneck analysis above, the following OS-level kernel/subsystem tuning actions are recommended. **Only OS-level tunables (`sysctl`, `/proc`, `/sys`) are in scope — do NOT include application-layer configuration changes (e.g., database parameters, JVM flags, application config files).** Apply only after confirming the current kernel parameters and that changes are safe for the running workload.
 
@@ -218,10 +261,11 @@ OS-level optimizations include, but are not limited to:
 - [x] Phase 3.1: Hot function analysis completed for top processes
 - [x] Phase 3.2: System call analysis completed for top processes (frequency and latency)
 - [x] Phase 4: All microarchitecture metrics collected and assessed
-- [x] Phase 5.1: Process and resource topology mapped
-- [x] Phase 5.2: All bottlenecks mapped with evidence and severity
-- [x] Phase 5.3: Final bottleneck summary written — no bottleneck left unmapped
-- [x] Phase 5.4: OS-level preliminary optimization recommendations provided for all identified bottlenecks
+- [x] Phase 5: Deep-dive analysis via specialized skills completed (if Critical/High severity bottlenecks identified)
+- [x] Phase 6.1: Process and resource topology mapped
+- [x] Phase 6.2: All bottlenecks mapped with evidence and severity
+- [x] Phase 6.3: Final bottleneck summary written — no bottleneck left unmapped
+- [x] Phase 6.4: OS-level preliminary optimization recommendations provided for all identified bottlenecks
 
 **Analysis is complete only when ALL items above are checked.**
 ```

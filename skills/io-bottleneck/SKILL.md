@@ -30,7 +30,7 @@ skill:remote-execution
 Execute on remote host via `ssh -q -tt root@<IP>`:
 
 ```bash
-uname -r && echo "---" && lsblk -d -n -o NAME,SIZE,TYPE | grep -E 'disk|nvme' && echo "---" && cat /sys/block/vda/queue/scheduler 2>/dev/null | grep -o '\[.*\]'
+lsblk -d -n -o NAME,SIZE,TYPE | grep -E 'disk|nvme' && echo "---" && cat /sys/block/vda/queue/scheduler 2>/dev/null | grep -o '\[.*\]'
 ```
 
 ### Step 2: Collect I/O Metrics (30 seconds)
@@ -59,25 +59,18 @@ echo "=== mpstat iowait per CPU ==="
 awk '$3 ~ /^[0-9]+$/ && $6 > 5 {print "CPU " $3 ": iowait=" $6 "%"}' /tmp/mpstat_out.txt | sort -u
 ```
 
-### Step 3: Identify Top I/O Processes
+### Step 3: Blocked Process Analysis
 
 ```bash
-echo "=== Top I/O Processes ==="
-ps -eo pid,comm,%cpu,%mem,state,wchan:32 | grep -E "^[0-9]" | sort -k3 -rn | head -15
-
-echo "=== Blocked Processes (state D=uninterruptible, S=interruptible) ==="
+echo "=== Blocked Processes (state D=uninterruptible I/O wait, S=interruptible) ==="
 ps -eo pid,comm,state,wchan:32 | awk '$3 ~ /^[DS]$/ {print}' | head -20
 ```
 
-### Step 4: Memory and Cache Analysis
+### Step 4: Page Cache Pressure Analysis
 
 ```bash
-echo "=== Memory Status ==="
-free -h
 echo "=== Page Cache Pressure ==="
 cat /proc/sys/vm/vfs_cache_pressure
-echo "=== Swap Usage ==="
-awk '/SwapTotal/{t=$2} /SwapFree/{f=$2} END{print "Swap: " t-f " used / " t " total"}' /proc/meminfo
 ```
 
 ---
