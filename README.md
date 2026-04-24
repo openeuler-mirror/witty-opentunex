@@ -96,12 +96,12 @@ opencode
 
 1、使用TAB键切换agent：选择 opentunex-assistant agent
 
-2、输入：帮我分析XX负载环境上的OS性能瓶颈/帮我优化XX负载环境上的性能
+2、输入：{(可选)初步负载采集数据已存放在 /tmp/data_collect_XXX 文件夹下，} 帮我分析XX负载环境上的OS性能瓶颈/帮我优化XX负载环境上的性能
 
-3、Agent加载需要的相关skill，输出下一步需执行的采集脚本
+3、Agent加载需要的相关skill，自动化分析后，给出瓶颈分析结果/优化建议，或下一步需执行的采集脚本
 
-4、脚本复制到客户环境执行（需保证benchmark负载执行中），执行结果通过飞书等软件传回本地机器
+4、脚本复制到客户环境执行(需保证benchmark负载执行中)，执行结果通过飞书等软件传回本地机器，保存到某个路径下
 
-5、执行结果回复给opentunex-assistant agent
+5、输入：采集脚本结果存放在 xxx.txt 文件内
 
-6、等待opentunex-assistant agent进行自动化分析，给出瓶颈分析结果/优化建议，或继续迭代进行下一步采集。
+6、等待opentunex-assistant agent进行迭代分析，给出瓶颈分析结果/优化建议，或下一步采集计划。
