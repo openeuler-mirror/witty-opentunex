@@ -25,36 +25,16 @@ skill:remote-execution
 
 ## Analysis Steps
 
-### Step 1: Quick Environment Check
-
-Execute on remote host via `ssh -q -tt root@<IP>`:
+### Step 1: Socket Memory Analysis
 
 ```bash
-uname -r && echo "---" && ss -s && echo "---" && cat /proc/net/sockstat
+echo "=== Socket Memory ===" && cat /proc/net/sockstat
 ```
 
-### Step 2: Connection State Analysis
+### Step 2: Loopback Latency Test
 
 ```bash
-echo "=== TCP Connection States ==="
-ss -tan | awk '{print $1}' | sort | uniq -c | sort -rn | head -10
-
-echo "=== Socket Memory ==="
-cat /proc/net/sockstat
-```
-
-### Step 3: TCP Stats
-
-```bash
-echo "=== TCP Retrans & Reset Stats ==="
-netstat -s | grep -E "retransmitted|resets sent|Timeouts" | head -10
-```
-
-### Step 4: Latency Test
-
-```bash
-echo "=== Loopback Latency ==="
-ping -c 5 127.0.0.1 2>/dev/null | tail -2
+echo "=== Loopback Latency ===" && ping -c 5 127.0.0.1 2>/dev/null | tail -2
 ```
 
 ---
@@ -72,19 +52,17 @@ ping -c 5 127.0.0.1 2>/dev/null | tail -2
 
 | Metric | Observed | Threshold | Status |
 |--------|----------|-----------|--------|
-| TIME_WAIT connections | X | >5000 | [CRITICAL/ELEVATED/NORMAL] |
-| FIN-WAIT-2 connections | X | >1000 | [CRITICAL/ELEVATED/NORMAL] |
-| TCP retrans segments | X | >100 | [CRITICAL/ELEVATED/NORMAL] |
+| Socket memory (used/orphaned) | X | >threshold | [CRITICAL/ELEVATED/NORMAL] |
 | Loopback latency | Xms | >30ms | [CRITICAL/ELEVATED/NORMAL] |
 
 ## Bottleneck Type
 | Type | Severity | Evidence |
 |------|----------|----------|
-| [Connection Exhaustion/Latency/Retrans/Error] | [High/Medium/Low] | [Description] |
+| [Socket Memory/Protocol Latency] | [High/Medium/Low] | [Description] |
 
 ## Root Cause Inference
 **Primary Cause**: [OS-level root cause]
-**Affected Components**: [Network Stack/NIC/Timers]
+**Affected Components**: [Network Stack/Protocol Timers]
 **Inference Confidence**: [High/Medium/Low]
 
 ## OS-Level Recommendations (Only)
@@ -98,9 +76,8 @@ ping -c 5 127.0.0.1 2>/dev/null | tail -2
 
 | Indicator | Critical | Elevated | Normal |
 |-----------|----------|----------|--------|
-| TIME_WAIT conns | >10000 | 5000-10000 | <5000 |
-| FIN-WAIT-2 conns | >5000 | 1000-5000 | <1000 |
-| TCP retrans | >1000/s | 100-1000/s | <100/s |
+| Socket orphans | >1000 | 500-1000 | <500 |
+| TCP memory used | >high threshold | medium | <low |
 | Loopback latency | >100ms | 30-100ms | <30ms |
 
 ---
