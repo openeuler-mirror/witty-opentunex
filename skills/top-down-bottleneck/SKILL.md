@@ -1,27 +1,27 @@
 ---
 name: top-down-bottleneck
-description: Top-down OS-level bottleneck analysis, includes comprehensive system collection, and three-level bottleneck analysis (global, process, microarchitecture). Use when diagnosing OS-level performance issues, identifying high-pressure processes, mapping resource dependencies, or analyzing OS-level resource bottlenecks. This skill does NOT analyze application-layer data (e.g., MySQL query plans, Java heap, Redis commands). Supports iterative refinement until sufficient analysis is achieved.
+description: Top-down OS-level bottleneck analysis, includes comprehensive system collection(read from user-given data collection files first), and three-level bottleneck analysis (global, process, microarchitecture). Use when diagnosing OS-level performance issues, identifying high-pressure processes, mapping resource dependencies, or analyzing OS-level resource bottlenecks. This skill does NOT analyze application-layer data (e.g., MySQL query plans, Java heap, Redis commands). Supports iterative refinement until sufficient analysis is achieved.
 ---
 
 # top-down-bottleneck — Top-Down System Bottleneck Analysis
 
 This skill performs a five-phase analysis:
-(1) system environment static information collection (hardware specs, software versions, kernel boot parameters);
+(1) system environment static information analysis;
 (2) global resource bottleneck identification and top resource-consuming process identification;
 (3) hotspot function and syscall analysis for top processes;
 (4) microarchitecture bottleneck analysis using PMU events;
 (5) evidence-based bottleneck analysis with severity mapping.
 The skill focuses exclusively on OS-level resource bottlenecks. It does NOT collect, analyze, or provide recommendations for application-layer data (database queries, JVM heap, application logs, etc.).
 The skill supports iterative refinement until sufficient analysis is achieved.
-Requires root permission for collecting related info.
+First try to read from user-given data collection files, if data is not enough, provides script to user to conduct supplementary collection.
 
 ---
 
-## Client Connection and Command Execution
+## Analysis Command Execution
 
-[1] if current <agent> is not opentunex-assistant agent, Load the `remote-execution` skill for standardized SSH connection and command execution.
+[1] only if **USER** has specified that remote command execution are allowed, Load the `remote-execution` skill for standardized SSH connection and command execution.
 
-[2] if current <agent> is opentunex-assistant agent, Keep the following rule for command execution:  **IMPORTANT** Always output commands which need execution to the **USER**, and ask **USER** for execution results, never execute command automatically by <agent> yourself.
+[2] otherwise, Keep the following rule for command execution: Always read from user-given data collection files to analyze, command execution results should be saved in these files, if some extra commands are needed for analysis, output command execution script to **USER**, and ask **USER** to provide execution results, never execute command automatically.
 
 ---
 
@@ -52,6 +52,7 @@ Identify bottleneck characteristics across CPU, memory, I/O, and network. Use sp
 **quick diagnosis**: run CPU/MEM/IO/NET analysis in background subtask and in parallel.
 
 **CPU Bottleneck Indicators**:
+
 ```bash
 # CPU utilization per core (skip 100% idle cores, keep header + all + active)
 mpstat -P ALL 1 5 | grep 'Average' | awk 'NR==1 || $3=="all" || $NF != "100.00"'
@@ -69,6 +70,7 @@ vmstat 5 2 | awk 'NR<=2{print; next} NR==3{next} {print; exit}'
 ```
 
 **Memory Bottleneck Indicators**:
+
 ```bash
 # Swap usage and pressure
 free -h
@@ -87,6 +89,7 @@ cat /proc/meminfo | grep -E "Slab|SReclaimable|SUnreclaim"
 ```
 
 **I/O Bottleneck Indicators**:
+
 ```bash
 # Disk utilization (skip since-boot, keep 5s interval sample, skip 0% util devices)
 iostat -xz 5 2 | awk '/^avg-cpu/{report++; if(report==2) print; next} /^Device/{if(report==2) print; next} /^$/{next} /Linux/{next} report==2 {if(/^[[:space:]]*[0-9]/){print; next} if(/^[a-z]/ && $NF+0>0){print; next}}'
@@ -101,6 +104,7 @@ echo "major minor device inflight_IO" && cat /proc/diskstats | awk '{print $1, $
 ```
 
 **Network Bottleneck Indicators**:
+
 ```bash
 # Network interface stats (skip idle interfaces with zero rx/tx kB/s)
 sar -n DEV 1 5 | grep 'Average' | awk 'NR==1 || $5+0>0 || $6+0>0'
@@ -132,6 +136,7 @@ echo "TIME_WAIT connections:" && ss -tan state time-wait | wc -l
 From Step 2.1, identify top resource-consuming processes and perform detailed OS-level analysis. **Focus on resource consumption patterns (CPU%, syscalls, context switches, I/O wait) — do NOT analyze application internals (query plans, heap dumps, application logic).**
 
 **Process Identification**:
+
 ```bash
 # Top 20 CPU processes (Sorted - header preserved by ps)
 ps aux --sort=-%cpu | head -20
@@ -182,6 +187,7 @@ perf record -F 59 -p <PID> -g -- sleep 15 && perf script | stackcollapse-perf.pl
 **Important**: use `remote-execution` skill for remote perf command.
 
 **syscall analysis**:
+
 ```bash
 # Trace system calls (summary with counts, latency, errors)
 timeout 15 strace -p <PID> -c -f
@@ -190,12 +196,14 @@ timeout 15 strace -p <PID> -c -f
 **For opentunex-assistant agent(dialog mode)**: provide single script and usage like `scripts/phase3.2-syscall-analysis.sh <PID>`. Parameter: `PID` — target process ID (required). Must run AFTER Phase 3.1 completes.
 
 **Key Metrics to Analyze**:
+
 - Top hotspot functions by CPU time (perf report)
 - System call patterns and latency (strace output)
 - Call stack depth and recursive patterns
 - User-space vs kernel-space time distribution
 
 **Anomaly Detection**:
+
 - Functions with unexpectedly high CPU time compared to historical baseline
 - Long-running system calls (block > 100ms)
 - High context switch rate (cs/s > 50000 for single process)
@@ -207,11 +215,12 @@ timeout 15 strace -p <PID> -c -f
 
 ## Phase 4: Microarchitecture Bottleneck Analysis
 
-⚠️ **HEAVYWEIGHT PHASE — All `perf stat` commands in this phase are heavyweight and MUST run sequentially.** See "Heavyweight Command Constraints" section above. 
+⚠️ **HEAVYWEIGHT PHASE — All `perf stat` commands in this phase are heavyweight and MUST run sequentially.** See "Heavyweight Command Constraints" section above.
 
 Use PMU (Performance Monitoring Unit) events to identify cache, branch, and pipeline bottlenecks:
 
 **CPU Cache Analysis**:
+
 ```bash
 # Cache miss rates (portable across x86/ARM)
 perf stat -e cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses -p <PID> -- sleep 15
@@ -221,6 +230,7 @@ perf stat -e dTLB-load-misses,iTLB-load-misses -p <PID> -- sleep 15 || true
 ```
 
 **Branch Prediction and Pipeline Analysis**:
+
 ```bash
 # Branch misprediction rate (branches may not be supported on all platforms)
 perf stat -e branches,branch-misses -p <PID> -- sleep 15 || true
@@ -230,6 +240,7 @@ perf stat -e stalled-cycles-frontend,stalled-cycles-backend,cycles,instructions 
 ```
 
 **Top-Down Microarchitecture Analysis**:
+
 ```bash
 # Portable pipeline metrics (cycles, instructions available everywhere)
 perf stat -e cycles,instructions -p <PID> -- sleep 15
@@ -240,6 +251,7 @@ toplev -p <PID> --sleep 15 || true
 ```
 
 **Memory Bandwidth and NUMA**:
+
 ```bash
 # Intel-only (may not exist on non-NUMA platforms, tolerate errors)
 perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 15 || true
@@ -247,6 +259,7 @@ perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 1
 ```
 
 **Output**: Microarchitecture bottleneck report with:
+
 - L1/LLC cache miss rates
 - Branch misprediction rate
 - Frontend/backend stall percentages
@@ -284,6 +297,7 @@ Map identified bottleneck types to specialized skills:
 For each identified bottleneck category with **Critical** or **High** severity, invoke the corresponding skill:
 
 **For I/O Bottlenecks:**
+
 ```bash
 # Invoke io-bottleneck skill
 skill:io-bottleneck
@@ -294,6 +308,7 @@ skill:io-bottleneck
 ```
 
 **For Memory Bottlenecks:**
+
 ```bash
 # Invoke mem-bottleneck skill
 skill:mem-bottleneck
@@ -306,6 +321,7 @@ skill:mem-bottleneck
 ```
 
 **For Network Bottlenecks:**
+
 ```bash
 # Invoke net-bottleneck skill
 skill:net-bottleneck
@@ -315,6 +331,7 @@ skill:net-bottleneck
 ```
 
 **For Lock Contention:**
+
 ```bash
 # Invoke lock-bottleneck skill
 skill:lock-bottleneck
@@ -327,6 +344,7 @@ skill:lock-bottleneck
 ```
 
 **For Scheduling Issues:**
+
 ```bash
 # Invoke schedule-trace-analysis skill
 skill:schedule-trace-analysis
@@ -365,12 +383,14 @@ skill:schedule-trace-analysis
 | NUMA Imbalance | remote_loads / local_loads | > 2:1 | perf stat |
 
 **Bottleneck prioritization**:
+
 1. **Critical**: Resource saturation (CPU 100%, Disk 100%, Swap in use)
 2. **High**: Excessive latency (I/O await > 100ms, network retrans > 10%)
 3. **Medium**: Performance degradation (cache miss > 30%, branch miss > 10%)
 4. **Low**: Suboptimal but not blocking (context switches elevated but acceptable)
 
 **Evidence collection checklist**:
+
 - [ ] Phase 1 system environment static info (hardware specs, software versions, kernel boot parameters)
 - [ ] Phase 2.1 global bottleneck identification (mpstat, iostat, pidstat, sar)
 - [ ] Phase 2.2 top process identification (ps, iotop, pidstat)
@@ -379,6 +399,7 @@ skill:schedule-trace-analysis
 - [ ] Phase 5 deep-dive analysis via specialized skills (if bottleneck type identified)
 
 **Output format for each bottleneck**:
+
 ```
 Bottleneck: [Resource/Component]
 Severity: [Critical/High/Medium/Low]
