@@ -55,18 +55,18 @@ Identify bottleneck characteristics across CPU, memory, I/O, and network. Use sp
 
 **Key Indicators to Analyze**:
 
-| Category | Key Indicators |
-|----------|----------------|
-| CPU | %user > 80%, %iowait > 20%, %steal > 10%, %soft > 10%, cs/s > 50000, in/s > 10000, loadavg > CPU_count*2, r > CPU_count |
-| CPU Thermal | core_throttle_count > 0, freq-gov (performance/powersave), thermal zone temp |
-| Memory | majflt/s > 1000 indicates swap thrashing; Slab > 30% of total memory indicates kernel memory pressure; MemAvailable < 15%; Committed_AS > 100% of total |
-| Memory PSI | memory stall % (some avg10 > 50%) indicates acute memory pressure; full avg10 > 50% indicates sustained pressure |
-| Memory Page Reclaim | pgscank/s > 1000 (kswapd scanning), pgscand/s > 1000 (direct reclaim) indicates memory reclaim pressure |
-| I/O | %util > 90%, await > 20ms, read_kB/s > 100000, write_kB/s > 50000, avgqu-sz > 16, %vmutil > 30% (page cache used for I/O buffering) |
-| Network TCP | retransmission rate > 2%, ListenDrops > 0, TIME_WAIT > 5000, established connections > 10000 per port, TCP orphans > 1000 |
-| Network Socket | socket memory (TCP mem exceed high_threshold), ListenOverflows > 0, halfopen connections > 1000 |
-| Network Softirq | softirq% > 30% of total CPU indicates network processing bottleneck; check NET_RX/TX softirq rates |
-| System | file-nr (allocated > max), inode-nr (allocated > max), threads-max reached, proc-pid-max reached |
+| Category | Key Indicators | Anomaly Detection (异常点) |
+|----------|----------------|---------------------------|
+| CPU | %user, %iowait, %steal, %soft, cs/s, in/s, loadavg, r (runnable) | %user > 80% (compute bound); %iowait > 20% (I/O wait); %steal > 10% (hypervisor contention); loadavg > CPU_count*2 (CPU saturation); r > CPU_count*4 (severe queueing) |
+| CPU Thermal | core_throttle_count, freq-gov, thermal zone temp | throttle > 0 (thermal throttling active); freq < nominal (performance degradation) |
+| Memory | majflt/s, Slab%, MemAvailable, Committed_AS | majflt/s > 1000 (swap thrashing); Slab > 30% (kernel memory pressure); MemAvailable < 15% (low memory); Committed_AS > 100% (overcommit risk) |
+| Memory PSI | memory stall % (some avg10, full avg10) | some avg10 > 50% (acute pressure); full avg10 > 50% (sustained pressure, critical) |
+| Memory Page Reclaim | pgscank/s, pgscand/s | pgscank/s > 1000 (kswapd aggressive scanning); pgscand/s > 1000 (direct reclaim storm) |
+| I/O | %util, await, read_kB/s, write_kB/s, avgqu-sz, %vmutil | %util > 90% (disk saturation); await > 20ms (I/O latency); avgqu-sz > 16 (queue backlog); %vmutil > 30% (memory pressure from I/O) |
+| Network TCP | retrans rate, ListenDrops, TIME_WAIT, established, orphans | Retrans > 2% (network quality issue); ListenDrops > 0 (listen queue overflow); TIME_WAIT > 5000 (connection cleanup backlog); orphans > 1000 (socket memory leak) |
+| Network Socket | TCP mem, ListenOverflows, halfopen | TCP mem > high_thresh (socket memory pressure); ListenOverflows > 0 (connection refused risk); halfopen > 1000 (SYN flood indicator) |
+| Network Softirq | softirq% of total CPU, NET_RX/TX rates | softirq% > 30% (network processing bottleneck); NET_RX spike (interrupt storm) |
+| System | file-nr, inode-nr, threads-max, proc-pid-max | file-nr > max (FD exhaustion); threads-max reached (thread creation blocked) |
 
 **Output**: Identify which resource(s) are under highest pressure with specific evidence (e.g., "CPU bottleneck: %iowait consistently 25-35% across 5 samples").
 
@@ -95,9 +95,12 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 - Call stack depth and recursive patterns
 - User-space vs kernel-space time distribution
 
-**Anomaly Detection**:
+**Anomaly Detection (异常点)**:
 - Functions with unexpectedly high CPU time compared to historical baseline
 - High context switch rate (cs/s > 50000 for single process)
+- Call stack depth > 20 indicates deep recursion or complex call chains
+- Kernel-space time% > 80% indicates syscall or I/O overhead
+- Single function CPU% > 50% indicates potential optimization target
 
 **Output**: For each top process, record: PID, name, top 5 hot functions, total CPU%, main system calls, identified bottlenecks with evidence.
 
@@ -111,6 +114,13 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 - System call patterns and latency (strace output)
 - Long-running system calls (block > 100ms)
 - Excessive system call frequency (> 10000 syscalls/sec)
+
+**Anomaly Detection (异常点)**:
+- syscall block > 100ms (slow syscall, potential I/O or lock wait)
+- syscall frequency > 10000/s (excessive syscall overhead, possible inefficient I/O)
+- error rate > 1% (application or permission issues)
+- repeated getpid/getuid calls > 1000/s (unnecessary syscall overhead)
+- epoll_wait/select > 5000/s with low events returned (idle polling)
 
 **Output**: For each top process, record: PID, name, syscall summary with counts, latency, and errors.
 
