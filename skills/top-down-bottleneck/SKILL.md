@@ -57,10 +57,15 @@ Identify bottleneck characteristics across CPU, memory, I/O, and network. Use sp
 
 | Category | Key Indicators |
 |----------|----------------|
-| CPU | %user > 80%, %iowait > 20%, %steal > 10%, %soft > 10%, cs/s > 50000, in/s > 10000 |
-| Memory | majflt/s > 1000 indicates swap thrashing; Slab > 30% of total memory indicates kernel memory pressure |
-| I/O | %util > 90%, await > 20ms, read_kB/s > 100000, write_kB/s > 50000 |
-| Network | retransmission rate > 2%, ListenDrops > 0, TIME_WAIT > 5000, established connections > 10000 per port |
+| CPU | %user > 80%, %iowait > 20%, %steal > 10%, %soft > 10%, cs/s > 50000, in/s > 10000, loadavg > CPU_count*2, r > CPU_count |
+| CPU Thermal | %steal > 10% (may indicate thermal throttling), freq-gov, core_throttle_count |
+| Memory | majflt/s > 1000 indicates swap thrashing; Slab > 30% of total memory indicates kernel memory pressure; MemAvailable < 15%; Committed_AS > 100% of total; PSI some > 50% |
+| Memory Page | pgscank/s > 1000, pgscand/s > 1000 indicates memory reclaim pressure |
+| I/O | %util > 90%, await > 20ms, read_kB/s > 100000, write_kB/s > 50000, avgqu-sz > 16, %vmutil > 30% |
+| Network | retransmission rate > 2%, ListenDrops > 0, TIME_WAIT > 5000, established connections > 10000 per port, TCP orphans > 1000 |
+| Network Socket | socket memory pressure, ListenOverflows, halfopen connections |
+| Network Softirq | softirq% > 30% indicates network processing bottleneck |
+| System | file-nr > system limit, inode-nr > system limit, threads-max reached |
 
 **Output**: Identify which resource(s) are under highest pressure with specific evidence (e.g., "CPU bottleneck: %iowait consistently 25-35% across 5 samples").
 
@@ -84,8 +89,6 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 **Collection Command**: Run `scripts/phase3.1-hotspot-function.sh <PID>` to collect hotspot function data.
 
-**Important**: use `remote-execution` skill for remote perf command.
-
 **Key Metrics to Analyze**:
 - Top hotspot functions by CPU time (perf report)
 - Call stack depth and recursive patterns
@@ -102,8 +105,6 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 ### Step 3.2: Syscall Analysis
 
 **Collection Command**: Run `scripts/phase3.2-syscall-analysis.sh <PID>` to collect syscall data. Must run AFTER Phase 3.1 completes.
-
-**Important**: use `remote-execution` skill for remote perf command.
 
 **Key Metrics to Analyze**:
 - System call patterns and latency (strace output)
@@ -236,16 +237,22 @@ skill:schedule-trace-analysis
 
 | Category | Key Evidence Metrics | Thresholds | Collection Method |
 |----------|---------------------|------------|-------------------|
-| CPU Compute | %user, load average, per-CPU utilization | %user > 80%, loadavg > CPU_count*2 | mpstat, pidstat -u, top |
+| CPU Compute | %user, load average, per-CPU utilization | %user > 80%, loadavg > CPU_count*2, r > CPU_count | mpstat, pidstat -u, top |
 | CPU I/O Wait | %iowait, vmstat b (blocked processes) | %iowait > 20%, blocked > 10 | mpstat, vmstat |
 | CPU Context Switch | cs/s (context switches), in/s (interrupts) | cs/s > 50000, in/s > 10000 | vmstat, pidstat -w |
+| CPU Thermal | thermal throttle count, freq | %steal > 10%, throttle > 0 | mpstat, /sys/kernel/thermal |
+| Memory Capacity | MemAvailable, Committed_AS, Swap | MemAvailable < 15%, Committed_AS > 100% | free, /proc/meminfo |
+| Memory PSI | PSI memory stall % | some > 50% | cat /proc/pressure/mem |
 | Memory Pressure | Swap usage, page faults, Slab | SwapUsed > 50%, majflt/s > 1000 | free, pidstat -r, meminfo |
+| Memory Reclaim | pgscank/s, pgscand/s | > 1000 | vmstat |
 | Memory Fragmentation | Slab, HugePages, Committed_AS | Slab > 30% total, frag > 50% | cat /proc/meminfo |
-| Disk I/O | %util, await, queue depth | %util > 90%, await > 20ms | iostat -xz |
+| Disk I/O | %util, await, queue depth, avgqu-sz | %util > 90%, await > 20ms, avgqu-sz > 16 | iostat -xz |
 | Disk I/O per process | read_kB/s, write_kB/s | > 100000 r/s, > 50000 w/s | pidstat -d |
 | Network Interface | rxerr/s, txerr/s, collisions | rxerr/s > 10, txerr/s > 10 | sar -n EDEV |
-| Network TCP | retransmission rate, drops | Retrans > 2%, ListenDrops > 0 | nstat, ss |
+| Network TCP | retransmission rate, drops, orphans | Retrans > 2%, ListenDrops > 0, orphans > 1000 | nstat, ss, /proc/net/sockstat |
 | Network Connections | TIME_WAIT, established per port | TIME_WAIT > 5000, conn/port > 10000 | ss |
+| Network Socket | socket memory, listen overflows | TCP memory > high, ListenOverflows > 0 | /proc/net/sockstat |
+| Network Softirq | softirq% of total CPU | > 30% | mpstat, /proc/softirqs |
 | L1 Cache | L1-dcache-load-misses / L1-dcache-loads | > 10% | perf stat |
 | LLC Cache | LLC-load-misses / LLC-loads | > 20% | perf stat |
 | Branch Prediction | branch-misses / branches | > 5% | perf stat |
