@@ -237,32 +237,33 @@ skill:schedule-trace-analysis
 
 **Requirement**: Every bottleneck claim MUST be backed by specific evidence from Phases 1-5. No vague or speculative statements.
 
-**Bottleneck categories and evidence mapping**:
+**Evidence chain**: Link findings across phases to form a complete causal chain:
 
-| Category | Key Evidence Metrics | Thresholds | Collection Method |
-|----------|---------------------|------------|-------------------|
-| CPU Compute | %user, load average, per-CPU utilization | %user > 80%, loadavg > CPU_count*2, r > CPU_count | mpstat, pidstat -u, top |
-| CPU I/O Wait | %iowait, vmstat b (blocked processes) | %iowait > 20%, blocked > 10 | mpstat, vmstat |
-| CPU Context Switch | cs/s (context switches), in/s (interrupts) | cs/s > 50000, in/s > 10000 | vmstat, pidstat -w |
-| CPU Thermal | core_throttle_count, freq | throttle > 0, freq < nominal | mpstat, /sys/kernel/thermal |
-| Memory Capacity | MemAvailable, Committed_AS, Swap | MemAvailable < 15%, Committed_AS > 100% | free, /proc/meminfo |
-| Memory PSI | memory stall % (some avg10, full avg10) | some avg10 > 50%, full avg10 > 50% | cat /proc/pressure/mem |
-| Memory Pressure | Swap usage, page faults, Slab | SwapUsed > 50%, majflt/s > 1000 | free, pidstat -r, meminfo |
-| Memory Reclaim | pgscank/s, pgscand/s | > 1000 | vmstat |
-| Memory Fragmentation | Slab, HugePages, Committed_AS | Slab > 30% total, frag > 50% | cat /proc/meminfo |
-| Disk I/O | %util, await, queue depth, avgqu-sz | %util > 90%, await > 20ms, avgqu-sz > 16 | iostat -xz |
-| Disk I/O per process | read_kB/s, write_kB/s | > 100000 r/s, > 50000 w/s | pidstat -d |
-| Network Interface | rxerr/s, txerr/s, collisions | rxerr/s > 10, txerr/s > 10 | sar -n EDEV |
-| Network TCP | retransmission rate, drops, orphans | Retrans > 2%, ListenDrops > 0, orphans > 1000 | nstat, ss, /proc/net/sockstat |
-| Network Connections | TIME_WAIT, established per port | TIME_WAIT > 5000, conn/port > 10000 | ss |
-| Network Socket | TCP mem (bytes), orphans, listen overflows | TCP mem > high_thresh, orphans > 1000, ListenOverflows > 0 | /proc/net/sockstat |
-| Network Softirq | softirq% of total CPU | > 30% | mpstat, /proc/softirqs |
-| L1 Cache | L1-dcache-load-misses / L1-dcache-loads | > 10% | perf stat |
-| LLC Cache | LLC-load-misses / LLC-loads | > 20% | perf stat |
-| Branch Prediction | branch-misses / branches | > 5% | perf stat |
-| Frontend Stall | stalled-cycles-frontend / cycles | > 30% | perf stat |
-| Backend Stall | stalled-cycles-backend / cycles | > 20% | perf stat |
-| NUMA Imbalance | remote_loads / local_loads | > 2:1 | perf stat |
+```
+Phase 1 (Static) → Phase 2.1 (Global) → Phase 2.2 (Process) → Phase 3 (Hotspot) → Phase 4 (Microarch) → Phase 5 (Specialized)
+
+Example evidence chain:
+1. Phase 2.1: %iowait > 30%, disk %util > 90% (global I/O saturation)
+2. Phase 2.2: process XYZ reads 50MB/s, major culprit
+3. Phase 3: perf shows 60% time in ext4_readpage, syscall read() blocked
+4. Phase 4: LLC miss rate 45% (critical), memory bound
+5. Conclusion: I/O bound process with LLC thrashing, recommend I/O scheduler tuning
+```
+
+**Example evidence mapping** (values from Phase 1-5 outputs):
+
+| Bottleneck | Phase 2.1 Finding | Phase 2.2/3 Finding | Phase 4 Finding | Inferred Root Cause |
+|------------|------------------|---------------------|-----------------|---------------------|
+| CPU I/O Wait | %iowait=35%, disk %util=95% | proc XYZ read=50MB/s | - | Disk saturation causing I/O wait |
+| Memory Pressure | majflt/s=1500, SwapUsed=60% | proc ABC VmRSS=8GB | CPI=2.8 (memory bound) | Swap thrashing, insufficient RAM |
+| Cache Bound | - | - | LLC miss rate=45%, CPI=3.2 | Memory access pattern issue |
+| Lock Contention | cs/s=65000, softirq%=25% | futex wait=80% | - | Userspace lock contention |
+| NUMA Imbalance | - | - | cross-SCCL=55% | Process bound to remote SCCL |
+
+**Evidence requirements**:
+- Each bottleneck claim MUST cite evidence from at least Phase 2.1 or 2.2
+- Critical/High severity requires Phase 3 or 4 supporting evidence
+- Root cause inference must connect observed metrics to system behavior
 
 **Bottleneck prioritization**:
 
