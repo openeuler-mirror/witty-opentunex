@@ -274,16 +274,6 @@ Example evidence chain:
 
 ---
 
-## Iteration Loop
-
-The skill allows repeated cycles to narrow the analysis scope:
-
-- **When to iterate**: Bottleneck(s) not yet identified with sufficient evidence, or next steps are unclear.
-- **How to iterate**: Each cycle narrows focus (e.g., specific container, port, device). Re-run Phase 1 if system state may have changed; otherwise reuse existing data and deepen analysis.
-- **Important — Complete All Phases Before Concluding**: Do NOT stop analysis early once an initial bottleneck is found. All phases (Phase 1 through Phase 5) must be fully executed and reported before concluding. Early termination prevents discovering secondary bottlenecks that may be equally or more impactful. The final report is only complete when every section of the Output Template has been filled with actual data.
-  - **Phase 5 Completion Requirement**: If any Critical or High severity bottlenecks are identified in Phase 1-4, Phase 5 deep-dive analysis via specialized skills MUST be completed before finalizing the report.
-- **Stop when**: All phases are fully executed, all evidence collected, all bottleneck categories mapped, Phase 5 deep-dive completed (if triggered), and the user confirms the report is complete.
-
 ---
 
 ## Output Template
@@ -294,6 +284,7 @@ reference:output-template
 
 ## Operational Notes
 
-- All phases result should be included in analysis summary.
-- All analysis must be specific and evidence-based; maintain rigor and professionalism.
+- **basic principle**: All analysis must be specific and evidence-based; maintain rigor and professionalism.
+- **Iteration**: If evidence is insufficient, narrow focus (e.g., container/port/device) and deepen analysis; reuse existing data if system state unchanged; Phase 5 deep-dive is required for Critical/High severity.
+- **Completion**: All phases must be fully executed before concluding; stop only when evidence is complete and user confirms. All phases result should be included in analysis summary.
 - **Scope Constraint — OS Level Only**: This skill analyzes ONLY OS-level information and bottlenecks. Do NOT collect, interpret, or provide recommendations based on application-layer data (e.g., MySQL query plans, PostgreSQL EXPLAIN output, Java heap/Garbage Collection logs, Redis command traces, application configuration files, application business logic). If application-layer issues are detected (e.g., a process spending excessive time in application code), describe it at the OS level (e.g., "process spending 80% CPU time in user space") without diving into application internals.
