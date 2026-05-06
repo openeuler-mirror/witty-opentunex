@@ -3,9 +3,7 @@ name: output-template
 description: Output template for top-down bottleneck analysis report
 ---
 
-# Output Template — Top-Down Bottleneck Analysis Report
-
-```markdown
+# Top-Down Bottleneck Analysis Report
 
 ## Phase 1: System Environment Static Information
 
@@ -139,35 +137,44 @@ description: Output template for top-down bottleneck analysis report
 
 ## Phase 6: Evidence-Based Bottleneck Mapping
 
-### 6.1 Topology Analysis
+### 6.1 Evidence Chain
 
-**Process Dependency Topology**:
-- [List all key processes and their relationships: parent → child, I/O wait chains]
-- [Identify which processes are causing cascading resource pressure]
+Link findings across phases to form a complete causal chain:
 
-**Resource Dependency Graph**:
-- [Map resource → process → OS component: e.g., Disk sda → mysqld → jbd2/dm-0-8]
+```
+Phase 1 (Static) → Phase 2.1 (Global) → Phase 2.2 (Process) → Phase 3 (Hotspot) → Phase 4 (Microarch) → Phase 5 (Specialized)
 
-### 6.2 Evidence-Based Bottleneck Mapping
+Evidence chain example:
+1. Phase 2.1: [%iowait > 30%, disk %util > 90%] → Global I/O saturation observed
+2. Phase 2.2: [proc XYZ read=50MB/s] → Process XYZ identified as major I/O consumer
+3. Phase 3: [60% time in ext4_readpage, syscall read() blocked] → Hotspot function identified
+4. Phase 4: [LLC miss rate 45%] → Memory access pattern issue confirmed
+5. Phase 5: [io-bottleneck deep-dive] → I/O scheduler and page cache pressure confirmed
+6. Conclusion: I/O bound process with LLC thrashing, root cause: excessive page cache pressure
+```
 
-| PID | TID | Name | OS Role | Main Bottleneck | Severity | Evidence |
-|-----|-----|------|---------|-----------------|----------|----------|
-| [PID] | [TID] | [name] | [kernel/daemon/user] | [bottleneck type] | [Critical/High/Medium/Low] | [metric=value, threshold=..., status=...] |
-| [PID] | [TID] | [name] | [kernel/daemon/user] | [bottleneck type] | [Critical/High/Medium/Low] | [metric=value, threshold=..., status=...] |
-| [PID] | [TID] | [name] | [kernel/daemon/user] | [bottleneck type] | [Critical/High/Medium/Low] | [metric=value, threshold=..., status=...] |
+### 6.2 Evidence Mapping
+
+Map each bottleneck to evidence from Phase 1-5:
+
+| Bottleneck | Phase 2.1 Finding | Phase 2.2/3 Finding | Phase 4 Finding | Inferred Root Cause |
+|------------|------------------|---------------------|-----------------|---------------------|
+| [Bottleneck 1] | [metric=value] | [PID, finding] | [microarch finding] | [root cause] |
+| [Bottleneck 2] | [metric=value] | [PID, finding] | [microarch finding] | [root cause] |
+| ... | ... | ... | ... | ... |
 
 ### 6.3 Final Bottleneck Summary
 
 **Primary Bottleneck**: [Resource/Component]
 - Severity: [Critical/High/Medium/Low]
-- Evidence: [All supporting metrics from Phases 1-4]
+- Evidence Chain: [Phase 2.1 → Phase 2.2 → Phase 3 → Phase 4]
 - Affected Processes: [All PIDs affected]
 
-**Secondary Bottleneck(s)**: [List all other identified bottlenecks in order of severity]
+**Secondary Bottleneck(s)**: [List in order of severity]
 
-**Bottleneck Chain**: [If multiple bottlenecks are causally linked, describe the chain: e.g., mysqld → high write I/O → jbd2 → disk saturation → CPU iowait]
+**Bottleneck Chain**: [If causally linked: e.g., mysqld → jbd2 → disk saturation → CPU iowait]
 
-**OS-Level Root Cause Hypothesis**: [Single-sentence hypothesis of the OS-level root cause]
+**Root Cause Hypothesis**: [Single-sentence OS-level root cause]
 
 ### 6.4 OS-Level Preliminary Optimization Recommendations
 
@@ -255,17 +262,17 @@ OS-level optimizations include, but are not limited to:
 ---
 
 **Report Completeness Checklist**:
-- [x] Phase 1: System environment static info collected (hardware specs, software versions, kernel boot parameters)
-- [x] Phase 2.1: All four global resources assessed with severity ratings
+- [x] Phase 1: System environment static info collected
+- [x] Phase 2.1: Global resource bottleneck identified (CPU/Memory/IO/Network)
 - [x] Phase 2.2: Top resource-consuming processes identified
 - [x] Phase 3.1: Hot function analysis completed for top processes
-- [x] Phase 3.2: System call analysis completed for top processes (frequency and latency)
-- [x] Phase 4: All microarchitecture metrics collected and assessed
-- [x] Phase 5: Deep-dive analysis via specialized skills completed (if Critical/High severity bottlenecks identified)
-- [x] Phase 6.1: Process and resource topology mapped
-- [x] Phase 6.2: All bottlenecks mapped with evidence and severity
-- [x] Phase 6.3: Final bottleneck summary written — no bottleneck left unmapped
-- [x] Phase 6.4: OS-level preliminary optimization recommendations provided for all identified bottlenecks
+- [x] Phase 3.2: Syscall analysis completed for top processes
+- [x] Phase 4: Microarchitecture metrics collected and assessed
+- [x] Phase 5: Deep-dive via specialized skills (if Critical/High identified)
+- [x] Phase 6.1: Evidence chain constructed linking Phase 1-5 findings
+- [x] Phase 6.2: All bottlenecks mapped with evidence from collected phases
+- [x] Phase 6.3: Final bottleneck summary with root cause hypothesis
+- [x] Phase 6.4: OS-level optimization recommendations provided
 
 **Analysis is complete only when ALL items above are checked.**
-```
+

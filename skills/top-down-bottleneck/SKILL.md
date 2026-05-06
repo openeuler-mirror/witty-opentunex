@@ -272,29 +272,6 @@ Example evidence chain:
 3. **Medium**: Performance degradation (cache miss > 30%, branch miss > 10%)
 4. **Low**: Suboptimal but not blocking (context switches elevated but acceptable)
 
-**Evidence collection checklist**:
-
-- [ ] Phase 1 system environment static info (hardware specs, software versions, kernel boot parameters)
-- [ ] Phase 2.1 global bottleneck identification (mpstat, iostat, pidstat, sar)
-- [ ] Phase 2.2 top process identification (ps, iotop, pidstat)
-- [ ] Phase 3 hotspot function and syscall analysis (perf, strace)
-- [ ] Phase 4 microarchitecture PMU events (perf stat)
-- [ ] Phase 5 deep-dive analysis via specialized skills (if bottleneck type identified)
-
-**Output format for each bottleneck**:
-
-```
-Bottleneck: [Resource/Component]
-Severity: [Critical/High/Medium/Low]
-Evidence:
-  - Metric 1: value (threshold, severity)
-  - Metric 2: value (threshold, severity)
-  - ...
-Root cause: [Specific cause based on analysis]
-Affected processes: [PID, name, role]
-Impact: [Description of user-visible impact]
-```
-
 ---
 
 ## Iteration Loop
