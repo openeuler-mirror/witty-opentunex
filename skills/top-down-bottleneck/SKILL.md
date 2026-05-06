@@ -58,14 +58,15 @@ Identify bottleneck characteristics across CPU, memory, I/O, and network. Use sp
 | Category | Key Indicators |
 |----------|----------------|
 | CPU | %user > 80%, %iowait > 20%, %steal > 10%, %soft > 10%, cs/s > 50000, in/s > 10000, loadavg > CPU_count*2, r > CPU_count |
-| CPU Thermal | %steal > 10% (may indicate thermal throttling), freq-gov, core_throttle_count |
-| Memory | majflt/s > 1000 indicates swap thrashing; Slab > 30% of total memory indicates kernel memory pressure; MemAvailable < 15%; Committed_AS > 100% of total; PSI some > 50% |
-| Memory Page | pgscank/s > 1000, pgscand/s > 1000 indicates memory reclaim pressure |
-| I/O | %util > 90%, await > 20ms, read_kB/s > 100000, write_kB/s > 50000, avgqu-sz > 16, %vmutil > 30% |
-| Network | retransmission rate > 2%, ListenDrops > 0, TIME_WAIT > 5000, established connections > 10000 per port, TCP orphans > 1000 |
-| Network Socket | socket memory pressure, ListenOverflows, halfopen connections |
-| Network Softirq | softirq% > 30% indicates network processing bottleneck |
-| System | file-nr > system limit, inode-nr > system limit, threads-max reached |
+| CPU Thermal | core_throttle_count > 0, freq-gov (performance/powersave), thermal zone temp |
+| Memory | majflt/s > 1000 indicates swap thrashing; Slab > 30% of total memory indicates kernel memory pressure; MemAvailable < 15%; Committed_AS > 100% of total |
+| Memory PSI | memory stall % (some avg10 > 50%) indicates acute memory pressure; full avg10 > 50% indicates sustained pressure |
+| Memory Page Reclaim | pgscank/s > 1000 (kswapd scanning), pgscand/s > 1000 (direct reclaim) indicates memory reclaim pressure |
+| I/O | %util > 90%, await > 20ms, read_kB/s > 100000, write_kB/s > 50000, avgqu-sz > 16, %vmutil > 30% (page cache used for I/O buffering) |
+| Network TCP | retransmission rate > 2%, ListenDrops > 0, TIME_WAIT > 5000, established connections > 10000 per port, TCP orphans > 1000 |
+| Network Socket | socket memory (TCP mem exceed high_threshold), ListenOverflows > 0, halfopen connections > 1000 |
+| Network Softirq | softirq% > 30% of total CPU indicates network processing bottleneck; check NET_RX/TX softirq rates |
+| System | file-nr (allocated > max), inode-nr (allocated > max), threads-max reached, proc-pid-max reached |
 
 **Output**: Identify which resource(s) are under highest pressure with specific evidence (e.g., "CPU bottleneck: %iowait consistently 25-35% across 5 samples").
 
@@ -240,9 +241,9 @@ skill:schedule-trace-analysis
 | CPU Compute | %user, load average, per-CPU utilization | %user > 80%, loadavg > CPU_count*2, r > CPU_count | mpstat, pidstat -u, top |
 | CPU I/O Wait | %iowait, vmstat b (blocked processes) | %iowait > 20%, blocked > 10 | mpstat, vmstat |
 | CPU Context Switch | cs/s (context switches), in/s (interrupts) | cs/s > 50000, in/s > 10000 | vmstat, pidstat -w |
-| CPU Thermal | thermal throttle count, freq | %steal > 10%, throttle > 0 | mpstat, /sys/kernel/thermal |
+| CPU Thermal | core_throttle_count, freq | throttle > 0, freq < nominal | mpstat, /sys/kernel/thermal |
 | Memory Capacity | MemAvailable, Committed_AS, Swap | MemAvailable < 15%, Committed_AS > 100% | free, /proc/meminfo |
-| Memory PSI | PSI memory stall % | some > 50% | cat /proc/pressure/mem |
+| Memory PSI | memory stall % (some avg10, full avg10) | some avg10 > 50%, full avg10 > 50% | cat /proc/pressure/mem |
 | Memory Pressure | Swap usage, page faults, Slab | SwapUsed > 50%, majflt/s > 1000 | free, pidstat -r, meminfo |
 | Memory Reclaim | pgscank/s, pgscand/s | > 1000 | vmstat |
 | Memory Fragmentation | Slab, HugePages, Committed_AS | Slab > 30% total, frag > 50% | cat /proc/meminfo |
@@ -251,7 +252,7 @@ skill:schedule-trace-analysis
 | Network Interface | rxerr/s, txerr/s, collisions | rxerr/s > 10, txerr/s > 10 | sar -n EDEV |
 | Network TCP | retransmission rate, drops, orphans | Retrans > 2%, ListenDrops > 0, orphans > 1000 | nstat, ss, /proc/net/sockstat |
 | Network Connections | TIME_WAIT, established per port | TIME_WAIT > 5000, conn/port > 10000 | ss |
-| Network Socket | socket memory, listen overflows | TCP memory > high, ListenOverflows > 0 | /proc/net/sockstat |
+| Network Socket | TCP mem (bytes), orphans, listen overflows | TCP mem > high_thresh, orphans > 1000, ListenOverflows > 0 | /proc/net/sockstat |
 | Network Softirq | softirq% of total CPU | > 30% | mpstat, /proc/softirqs |
 | L1 Cache | L1-dcache-load-misses / L1-dcache-loads | > 10% | perf stat |
 | LLC Cache | LLC-load-misses / LLC-loads | > 20% | perf stat |
