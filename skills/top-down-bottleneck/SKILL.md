@@ -274,8 +274,6 @@ Example evidence chain:
 
 ---
 
----
-
 ## Output Template
 
 reference:output-template
