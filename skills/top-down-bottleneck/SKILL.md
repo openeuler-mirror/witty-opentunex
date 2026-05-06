@@ -39,8 +39,6 @@ First try to read from user-given data collection files, if data is not enough, 
 
 **Output**: Static system profile: hardware specs (CPU model/core count/NUMA, memory size, disk types, NIC models), software versions (OS, kernel, tools), kernel boot parameters and key sysctl settings.
 
-reference:basic-system-info
-
 ---
 
 ## Phase 2: Main Workload Identification and Bottleneck Analysis
@@ -51,11 +49,9 @@ reference:basic-system-info
 
 Identify bottleneck characteristics across CPU, memory, I/O, and network. Use specific metrics to pinpoint resource pressure.
 
-**quick diagnosis**: run CPU/MEM/IO/NET analysis in background subtask and in parallel.
-
 **Key Indicators to Analyze**:
 
-| Category | Key Indicators | Anomaly Detection (异常点) |
+| Category | Key Indicators | Anomaly Detection |
 |----------|----------------|---------------------------|
 | CPU | %user, %iowait, %steal, %soft, cs/s, in/s, loadavg, r (runnable) | %user > 80% (compute bound); %iowait > 20% (I/O wait); %steal > 10% (hypervisor contention); loadavg > CPU_count*2 (CPU saturation); r > CPU_count*4 (severe queueing) |
 | CPU Thermal | core_throttle_count, freq-gov, thermal zone temp | throttle > 0 (thermal throttling active); freq < nominal (performance degradation) |
@@ -91,16 +87,13 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 **Collection Command**: Run `scripts/phase3.1-hotspot-function.sh <PID>` to collect hotspot function data.
 
 **Key Metrics to Analyze**:
-- Top hotspot functions by CPU time (perf report)
-- Call stack depth and recursive patterns
-- User-space vs kernel-space time distribution
 
-**Anomaly Detection (异常点)**:
-- Functions with unexpectedly high CPU time compared to historical baseline
-- High context switch rate (cs/s > 50000 for single process)
-- Call stack depth > 20 indicates deep recursion or complex call chains
-- Kernel-space time% > 80% indicates syscall or I/O overhead
-- Single function CPU% > 50% indicates potential optimization target
+| Category | Key Metrics | Anomaly Detection |
+|----------|-------------|-------------------|
+| Hotspot Functions | top functions by CPU time, function name, module | function CPU% > 50% (optimization target); function not in expected module (unexpected load) |
+| Call Stack | stack depth, recursive patterns | depth > 20 (deep recursion); recursive call detected (stack overflow risk) |
+| Time Distribution | user-space %, kernel-space % | kernel% > 80% (syscall/I/O overhead); user% < 20% with high CPU (app issue) |
+| Context Switch | cs/s per process | cs/s > 50000 for single process (excessive switching) |
 
 **Output**: For each top process, record: PID, name, top 5 hot functions, total CPU%, main system calls, identified bottlenecks with evidence.
 
@@ -111,16 +104,13 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 **Collection Command**: Run `scripts/phase3.2-syscall-analysis.sh <PID>` to collect syscall data. Must run AFTER Phase 3.1 completes.
 
 **Key Metrics to Analyze**:
-- System call patterns and latency (strace output)
-- Long-running system calls (block > 100ms)
-- Excessive system call frequency (> 10000 syscalls/sec)
 
-**Anomaly Detection (异常点)**:
-- syscall block > 100ms (slow syscall, potential I/O or lock wait)
-- syscall frequency > 10000/s (excessive syscall overhead, possible inefficient I/O)
-- error rate > 1% (application or permission issues)
-- repeated getpid/getuid calls > 1000/s (unnecessary syscall overhead)
-- epoll_wait/select > 5000/s with low events returned (idle polling)
+| Category | Key Metrics | Anomaly Detection |
+|----------|-------------|-------------------|
+| Syscall Latency | block time per syscall, slow syscall count | block > 100ms (slow syscall, I/O or lock wait); block > 1000ms (severe delay) |
+| Syscall Frequency | syscalls/sec, syscall pattern | freq > 10000/s (excessive overhead); unusual syscall mix (unexpected behavior) |
+| Syscall Errors | error rate, error types | error rate > 1% (app/permission issues); ENOSPC/EMFILE (resource exhaustion) |
+| Specific Syscalls | getpid/getuid calls, epoll_wait/select | getpid > 1000/s (unnecessary overhead); epoll_wait > 5000/s with low events (idle polling) |
 
 **Output**: For each top process, record: PID, name, syscall summary with counts, latency, and errors.
 
@@ -132,24 +122,27 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 Use PMU (Performance Monitoring Unit) events to identify cache, branch, and pipeline bottlenecks:
 
-**Key Indicators to Analyze**:
+**Key Metrics to Analyze**:
 
-| Category | Key Indicators | Thresholds |
-|----------|----------------|------------|
-| L1 Cache | L1-dcache-load-misses / L1-dcache-loads | > 10% |
-| LLC Cache | LLC-load-misses / LLC-loads | > 20% |
-| Branch Prediction | branch-misses / branches | > 5% |
-| Frontend Stall | stalled-cycles-frontend / cycles | > 30% |
-| Backend Stall | stalled-cycles-backend / cycles | > 20% |
-| NUMA Imbalance | remote_loads / local_loads | > 2:1 |
+| Category | Key Metrics | Anomaly Detection |
+|----------|-------------|-------------------|
+| L1 Cache | L1-dcache-loads, L1-dcache-load-misses, miss rate | miss rate > 10% (L1 cache pressure); > 15% (severe) |
+| LLC Cache | LLC-loads, LLC-load-misses, miss rate | miss rate > 20% (LLC pressure); > 30% (severe memory footprint) |
+| TLB | dTLB-loads, dTLB-load-misses, iTLB-loads, iTLB-load-misses, miss rate | miss rate > 5% (TLB pressure); > 10% (severe, memory access overhead) |
+| Branch Prediction | branches, branch-misses, miss rate | miss rate > 5% (prediction errors); > 10% (high mispredict penalty) |
+| CPU Efficiency | cycles, instructions, CPI = cycles/instructions | CPI > 2 (memory bound); CPI > 3 (severe memory bottleneck) |
+| Frontend Stall | stalled-cycles-frontend, cycles, stall % | stall% > 30% (frontend bound); > 50% (severe fetch bottleneck) |
+| Backend Stall | stalled-cycles-backend, cycles, stall % | stall% > 20% (backend bound); > 40% (memory latency issue) |
+| NUMA (SCCL) | remote_access, ll_cache_miss; cross-SCCL ratio = remote_access / (remote_access + ll_cache_miss) | cross-SCCL ratio > 30% (NUMA imbalance); > 50% (critical, severe cross-SCCL access) |
 
 **Output**: Microarchitecture bottleneck report with:
 
-- L1/LLC cache miss rates
-- Branch misprediction rate
-- Frontend/backend stall percentages
-- NUMA locality ratios
-- Identified microarchitecture bottlenecks (e.g., "L1 cache miss rate 15% - high memory access density at OS level")
+- L1/LLC cache miss rates and thresholds exceeded
+- TLB miss rates and impact
+- Branch misprediction rate and impact
+- Frontend/backend stall percentages and severity
+- Cross-SCCL NUMA ratio and impact (ARM only)
+- Identified microarchitecture bottlenecks with severity mapping
 
 ---
 
