@@ -78,8 +78,6 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 ## Phase 3: Hotspot Function and Syscall Analysis
 
-⚠️ **HEAVYWEIGHT PHASE — All commands in this phase are heavyweight and MUST run sequentially.** See "Heavyweight Command Constraints" section above.
-
 **Execution order**: Step 3.1 → wait for completion → Step 3.2. Do NOT overlap.
 
 ### Step 3.1: Hotspot Function Analysis
@@ -117,8 +115,6 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 ---
 
 ## Phase 4: Microarchitecture Bottleneck Analysis
-
-⚠️ **HEAVYWEIGHT PHASE — All `perf stat` commands in this phase are heavyweight and MUST run sequentially.** See "Heavyweight Command Constraints" section above.
 
 **Collection Command**: Run `scripts/phase4-microarch.sh <PID>` to collect microarchitecture PMU data. Must run AFTER Phase 3 completes.
 
