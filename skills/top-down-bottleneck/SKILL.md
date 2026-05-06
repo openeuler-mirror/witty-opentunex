@@ -35,11 +35,11 @@ First try to read from user-given data collection files, if data is not enough, 
 
 **Objective**: Gather static system environment information — hardware specifications, software versions, and kernel boot parameters. This phase collects **static** facts about the system, not dynamic runtime metrics.
 
-reference:basic-system-info
+**Collection Command**: Run `scripts/phase1-static-info.sh` to collect static system information.
 
 **Output**: Static system profile: hardware specs (CPU model/core count/NUMA, memory size, disk types, NIC models), software versions (OS, kernel, tools), kernel boot parameters and key sysctl settings.
 
-**For opentunex-assistant agent(dialog mode)**: provide single script and usage like `scripts/phase1-static-info.sh`. No parameters required.
+reference:basic-system-info
 
 ---
 
@@ -47,113 +47,32 @@ reference:basic-system-info
 
 ### Step 2.1: Global Resource Bottleneck Identification
 
+**Collection Command**: Run `scripts/phase2.1-global-bottleneck.sh` to collect global resource bottleneck indicators.
+
 Identify bottleneck characteristics across CPU, memory, I/O, and network. Use specific metrics to pinpoint resource pressure.
 
 **quick diagnosis**: run CPU/MEM/IO/NET analysis in background subtask and in parallel.
 
-**CPU Bottleneck Indicators**:
+**Key Indicators to Analyze**:
 
-```bash
-# CPU utilization per core (skip 100% idle cores, keep header + all + active)
-mpstat -P ALL 1 5 | grep 'Average' | awk 'NR==1 || $3=="all" || $NF != "100.00"'
-
-# Load average vs CPU count
-cat /proc/loadavg
-
-# Context switches and interrupts (skip since-boot sample, keep 5-second interval)
-vmstat 5 2 | awk 'NR<=2{print; next} NR==3{next} {print; exit}'
-
-# Top 30 context switch tasks (Sorted by cswch/s - header + top 30)
-{ echo "      UID       PID   cswch/s nvcswch/s  Command"; pidstat -w 1 5 | grep 'Average' | grep -v "UID" | sort -k4 -rn | head -30; }
-
-# Key indicators: %user > 80%, %iowait > 20%, %steal > 10%, %soft > 10%, cs/s > 50000, in/s > 10000
-```
-
-**Memory Bottleneck Indicators**:
-
-```bash
-# Swap usage and pressure
-free -h
-
-# Key swap metrics only
-cat /proc/meminfo | grep -E "SwapTotal|SwapFree|SwapCached|CommitLimit|Committed_AS"
-
-# Page faults - Top 20 by majflt/s (Sorted - header + top 20)
-{ echo "      UID       PID  minflt/s  majflt/s     VSZ     RSS   %MEM  Command"; pidstat -r 1 5 | grep 'Average' | grep -v "UID" | sort -k5 -rn | head -20; }
-
-# Key indicators: majflt/s > 1000 indicates swap thrashing
-# Slab memory usage
-cat /proc/meminfo | grep -E "Slab|SReclaimable|SUnreclaim"
-
-# Key indicators: Slab > 30% of total memory indicates kernel memory pressure
-```
-
-**I/O Bottleneck Indicators**:
-
-```bash
-# Disk utilization (skip since-boot, keep 5s interval sample, skip 0% util devices)
-iostat -xz 5 2 | awk '/^avg-cpu/{report++; if(report==2) print; next} /^Device/{if(report==2) print; next} /^$/{next} /Linux/{next} report==2 {if(/^[[:space:]]*[0-9]/){print; next} if(/^[a-z]/ && $NF+0>0){print; next}}'
-
-# Queue depth (inflight_IO is instantaneous, not cumulative)
-echo "major minor device inflight_IO" && cat /proc/diskstats | awk '{print $1, $2, $3, $12}'
-
-# Top 20 I/O processes by kB_wr/s (Sorted - header + top 20)
-{ echo "      UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s iodelay  Command"; pidstat -d 1 5 | grep 'Average' | grep -v "UID" | sort -k5 -rn | head -20; }
-
-# Key indicators: %util > 90%, await > 20ms, read_kB/s > 100000, write_kB/s > 50000
-```
-
-**Network Bottleneck Indicators**:
-
-```bash
-# Network interface stats (skip idle interfaces with zero rx/tx kB/s)
-sar -n DEV 1 5 | grep 'Average' | awk 'NR==1 || $5+0>0 || $6+0>0'
-
-# Network error stats (skip interfaces with all-zero errors)
-sar -n EDEV 1 5 | grep 'Average' | awk 'NR==1{print; next} {for(i=3;i<=NF;i++) if($i+0>0){print; next}}'
-
-# TCP retransmissions and drops (5-second two-snapshot delta, excludes since-boot accumulation)
-nstat -az | grep -E "^(TcpOutSegs|TcpRetransSegs|TcpExtTCPLostRetransmit|TcpExtListenOverflows|TcpExtListenDrops)" | awk '{print $1,$2}' > /tmp/nstat_before.txt && sleep 5 && nstat -az | grep -E "^(TcpOutSegs|TcpRetransSegs|TcpExtTCPLostRetransmit|TcpExtListenOverflows|TcpExtListenDrops)" | awk '{print $1,$2}' > /tmp/nstat_after.txt && echo "counter delta rate/s" && join /tmp/nstat_before.txt /tmp/nstat_after.txt | awk -v s=5 '{printf "%-40s %8d %8.1f\n", $1, $3-$2, ($3-$2)/s}'
-# Key indicators: retransmission rate > 2%, ListenDrops > 0
-
-# Connection backlog
-echo "TIME_WAIT connections:" && ss -tan state time-wait | wc -l
-
-# Top 10 ports by established connections (Sorted - header + top 10)
-{ echo "count port"; ss -tn state established | awk '{print $4}' | awk -F: '{print $NF}' | sort | uniq -c | sort -rn | head -10; }
-
-# Key indicators: TIME_WAIT > 5000, established connections > 10000 per port
-```
+| Category | Key Indicators |
+|----------|----------------|
+| CPU | %user > 80%, %iowait > 20%, %steal > 10%, %soft > 10%, cs/s > 50000, in/s > 10000 |
+| Memory | majflt/s > 1000 indicates swap thrashing; Slab > 30% of total memory indicates kernel memory pressure |
+| I/O | %util > 90%, await > 20ms, read_kB/s > 100000, write_kB/s > 50000 |
+| Network | retransmission rate > 2%, ListenDrops > 0, TIME_WAIT > 5000, established connections > 10000 per port |
 
 **Output**: Identify which resource(s) are under highest pressure with specific evidence (e.g., "CPU bottleneck: %iowait consistently 25-35% across 5 samples").
-
-**For opentunex-assistant agent(dialog mode)**: provide single script and usage like `scripts/phase2.1-global-bottleneck.sh`. No parameters required. All commands are lightweight.
 
 ---
 
 ### Step 2.2: Top Resource Process Identification
 
+**Collection Command**: Run `scripts/phase2.2-top-processes.sh` to collect top resource-consuming processes.
+
 From Step 2.1, identify top resource-consuming processes and perform detailed OS-level analysis. **Focus on resource consumption patterns (CPU%, syscalls, context switches, I/O wait) — do NOT analyze application internals (query plans, heap dumps, application logic).**
 
-**Process Identification**:
-
-```bash
-# Top 20 CPU processes (Sorted - header preserved by ps)
-ps aux --sort=-%cpu | head -20
-
-# Top 20 memory processes (Sorted - header preserved by ps)
-ps aux --sort=-%mem | head -20
-
-# Top 20 I/O processes by iotop (5-second sampling)
-{ echo "    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND"; iotop -oP -b -n 5 -d 1 | grep -E "^\s*[0-9]" | head -20; } || true
-
-# Top 20 I/O processes by pidstat (Sorted by kB_wr/s col 5 - header + top 20)
-{ echo "      UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s iodelay  Command"; pidstat -d 1 5 | grep 'Average' | grep -v "UID" | sort -k5 -rn | head -20; }
-```
-
 **Output**: Top processes consuming cpu/mem/io resource.
-
-**For opentunex-assistant agent(dialog mode)**: provide single script and usage like `scripts/phase2.2-top-processes.sh`. No parameters required.
 
 ---
 
@@ -165,51 +84,35 @@ ps aux --sort=-%mem | head -20
 
 ### Step 3.1: Hotspot Function Analysis
 
-**Important**: use `remote-execution` skill for remote perf command.
-
-```bash
-# Record performance data for target process (15 seconds)
-perf record -p <PID> -g -- sleep 15
-# check perf.data size, if larger than 500MB, reduce sampling time to 5 seconds and resample
-
-# Analyze recorded data (only show symbols with overhead >= 1%)
-perf report --stdio --percent-limit 1
-# Real-time sampling
-timeout 15 perf top -p <PID>
-# Generate flamegraph (requires flamegraph tools, tolerate if not installed)
-perf record -F 59 -p <PID> -g -- sleep 15 && perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg || true
-```
-
-**For opentunex-assistant agent(dialog mode)**: provide single script and usage like `scripts/phase3.1-hotspot-function.sh <PID>`. Parameter: `PID` — target process ID (required).
-
-### Step 3.2: Syscall Analysis
+**Collection Command**: Run `scripts/phase3.1-hotspot-function.sh <PID>` to collect hotspot function data.
 
 **Important**: use `remote-execution` skill for remote perf command.
-
-**syscall analysis**:
-
-```bash
-# Trace system calls (summary with counts, latency, errors)
-timeout 15 strace -p <PID> -c -f
-```
-
-**For opentunex-assistant agent(dialog mode)**: provide single script and usage like `scripts/phase3.2-syscall-analysis.sh <PID>`. Parameter: `PID` — target process ID (required). Must run AFTER Phase 3.1 completes.
 
 **Key Metrics to Analyze**:
-
 - Top hotspot functions by CPU time (perf report)
-- System call patterns and latency (strace output)
 - Call stack depth and recursive patterns
 - User-space vs kernel-space time distribution
 
 **Anomaly Detection**:
-
 - Functions with unexpectedly high CPU time compared to historical baseline
-- Long-running system calls (block > 100ms)
 - High context switch rate (cs/s > 50000 for single process)
-- Excessive system call frequency (> 10000 syscalls/sec)
 
 **Output**: For each top process, record: PID, name, top 5 hot functions, total CPU%, main system calls, identified bottlenecks with evidence.
+
+---
+
+### Step 3.2: Syscall Analysis
+
+**Collection Command**: Run `scripts/phase3.2-syscall-analysis.sh <PID>` to collect syscall data. Must run AFTER Phase 3.1 completes.
+
+**Important**: use `remote-execution` skill for remote perf command.
+
+**Key Metrics to Analyze**:
+- System call patterns and latency (strace output)
+- Long-running system calls (block > 100ms)
+- Excessive system call frequency (> 10000 syscalls/sec)
+
+**Output**: For each top process, record: PID, name, syscall summary with counts, latency, and errors.
 
 ---
 
@@ -217,46 +120,20 @@ timeout 15 strace -p <PID> -c -f
 
 ⚠️ **HEAVYWEIGHT PHASE — All `perf stat` commands in this phase are heavyweight and MUST run sequentially.** See "Heavyweight Command Constraints" section above.
 
+**Collection Command**: Run `scripts/phase4-microarch.sh <PID>` to collect microarchitecture PMU data. Must run AFTER Phase 3 completes.
+
 Use PMU (Performance Monitoring Unit) events to identify cache, branch, and pipeline bottlenecks:
 
-**CPU Cache Analysis**:
+**Key Indicators to Analyze**:
 
-```bash
-# Cache miss rates (portable across x86/ARM)
-perf stat -e cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses -p <PID> -- sleep 15
-# Key indicators: L1 miss rate > 10%, LLC miss rate > 20%
-# TLB miss statistics (may not be available on all platforms, tolerate errors)
-perf stat -e dTLB-load-misses,iTLB-load-misses -p <PID> -- sleep 15 || true
-```
-
-**Branch Prediction and Pipeline Analysis**:
-
-```bash
-# Branch misprediction rate (branches may not be supported on all platforms)
-perf stat -e branches,branch-misses -p <PID> -- sleep 15 || true
-# Pipeline stall analysis
-perf stat -e stalled-cycles-frontend,stalled-cycles-backend,cycles,instructions -p <PID> -- sleep 15
-# Key indicators: branch miss rate > 5%, frontend stalls > 30% cycles, backend stalls > 20% cycles
-```
-
-**Top-Down Microarchitecture Analysis**:
-
-```bash
-# Portable pipeline metrics (cycles, instructions available everywhere)
-perf stat -e cycles,instructions -p <PID> -- sleep 15
-# Intel-only uops metrics (tolerate error on non-Intel platforms)
-perf stat -e uops_executed,uops_retired -p <PID> -- sleep 15 || true
-# Intel pmu-tools Top-Down analysis (Intel-only, tolerate if not installed)
-toplev -p <PID> --sleep 15 || true
-```
-
-**Memory Bandwidth and NUMA**:
-
-```bash
-# Intel-only (may not exist on non-NUMA platforms, tolerate errors)
-perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 15 || true
-# Key indicators: remote/local > 2:1 indicates NUMA imbalance
-```
+| Category | Key Indicators | Thresholds |
+|----------|----------------|------------|
+| L1 Cache | L1-dcache-load-misses / L1-dcache-loads | > 10% |
+| LLC Cache | LLC-load-misses / LLC-loads | > 20% |
+| Branch Prediction | branch-misses / branches | > 5% |
+| Frontend Stall | stalled-cycles-frontend / cycles | > 30% |
+| Backend Stall | stalled-cycles-backend / cycles | > 20% |
+| NUMA Imbalance | remote_loads / local_loads | > 2:1 |
 
 **Output**: Microarchitecture bottleneck report with:
 
@@ -265,8 +142,6 @@ perf stat -e node_loads,node_stores,local_loads,remote_loads -p <PID> -- sleep 1
 - Frontend/backend stall percentages
 - NUMA locality ratios
 - Identified microarchitecture bottlenecks (e.g., "L1 cache miss rate 15% - high memory access density at OS level")
-
-**For opentunex-assistant agent(dialog mode)**: provide single script and usage like like `scripts/phase4-microarch.sh <PID>`. Parameter: `PID` — target process ID (required). Must run AFTER Phase 3 completes.
 
 ---
 
