@@ -7,6 +7,8 @@ description: OS-level Memory bottleneck analysis. Analyzes memory utilization, s
 
 This skill analyzes OS-level memory performance bottlenecks, including memory-access-intensive scenarios where memory usage is low but memory bandwidth or NUMA access patterns cause performance issues.
 
+First try to read from user-given data collection files, if data is not enough, provides script to user to conduct supplementary collection.
+
 ---
 
 ## Scope Limitation

@@ -12,6 +12,8 @@ This skill performs comprehensive analysis of OS-level lock performance bottlene
 - **Context switch impact**: Lock-induced context switches and scheduling
 - **Run queue stalls**: Time spent waiting to be scheduled due to lock activity
 
+First try to read from user-given data collection files, if data is not enough, provides script to user to conduct supplementary collection.
+
 ---
 
 ## Scope Limitation

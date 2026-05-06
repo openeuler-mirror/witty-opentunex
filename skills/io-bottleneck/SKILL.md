@@ -7,6 +7,8 @@ description: OS-level I/O bottleneck analysis. Analyzes disk utilization, I/O wa
 
 This skill analyzes OS-level I/O performance bottlenecks.
 
+First try to read from user-given data collection files, if data is not enough, provides script to user to conduct supplementary collection.
+
 ---
 
 ## Scope Limitation

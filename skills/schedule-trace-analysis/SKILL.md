@@ -11,6 +11,8 @@ This skill performs comprehensive analysis of process scheduling behavior using 
 - **Preempting tasks**: Which tasks are competing for CPU time and causing scheduling interference
 - **Global scheduling analysis**: System-wide scheduling perspective to understand overall CPU time distribution
 
+First try to read from user-given data collection files, if data is not enough, provides script to user to conduct supplementary collection.
+
 ---
 
 ## Client Connection and Command Execution

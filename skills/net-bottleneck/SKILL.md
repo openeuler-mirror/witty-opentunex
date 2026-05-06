@@ -7,6 +7,8 @@ description: OS-level Network bottleneck analysis. Analyzes network subsystem pe
 
 This skill analyzes OS-level network performance bottlenecks.
 
+First try to read from user-given data collection files, if data is not enough, provides script to user to conduct supplementary collection.
+
 ---
 
 ## Scope Limitation
