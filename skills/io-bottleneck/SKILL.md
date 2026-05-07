@@ -1,95 +1,67 @@
 ---
 name: io-bottleneck
-description: OS-level I/O bottleneck analysis. Analyzes disk utilization, I/O wait, queue depth, and memory压力 to identify OS-level I/O bottlenecks. Use when diagnosing disk I/O performance issues.
+description: OS-level I/O bottleneck analysis. Analyzes disk utilization, I/O wait, queue depth, and memory pressure to identify OS-level I/O bottlenecks. Use when diagnosing disk I/O performance issues.
 ---
 
 # OS I/O Bottleneck Analysis
 
-This skill analyzes OS-level I/O performance bottlenecks.
-
-First try to read from user-given data collection files, if data is not enough, provides script to user to conduct supplementary collection.
+This skill performs OS-level I/O performance bottleneck analysis.
 
 ---
 
-## Scope Limitation
+## Analysis Command Execution
 
-1. **OS Components Only**: Analyzes only OS-native kernel components (I/O Scheduler, Block Layer, Memory Management, Filesystem)
-2. **No Application-Level Analysis**: Results show only OS-level bottlenecks
-3. **Results**: Contain only OS-level bottleneck indicators and optimization suggestions
+[1] only if **USER** has specified that remote command execution are allowed, Load the `remote-execution` skill for standardized SSH connection and command execution.
 
----
-
-## Client Connection
-
-skill:remote-execution
+[2] otherwise, Keep the following rule for command execution: Always read from user-given data collection files to analyze, command execution results should be saved in these files, if some extra commands are needed for analysis, output command execution script to **USER**, and ask **USER** to provide execution results, never execute command automatically.
 
 ---
 
-## Analysis Steps
+## Phase 1: Data Collection
 
-### Step 1: Environment Check
+**Collection Command**: Run `scripts/collect_io_metrics.sh` to collect I/O metrics (15 seconds).
 
-Execute on remote host via `ssh -q -tt root@<IP>`:
-
-```bash
-lsblk -d -n -o NAME,SIZE,TYPE | grep -E 'disk|nvme' && echo "---" && cat /sys/block/vda/queue/scheduler 2>/dev/null | grep -o '\[.*\]'
-```
-
-### Step 2: Collect I/O Metrics (30 seconds)
-
-Collect data in background:
-
-```bash
-(
-  vmstat 1 30 > /tmp/vmstat_out.txt &
-  iostat -xz 1 30 > /tmp/iostat_out.txt &
-  mpstat -P ALL 1 30 > /tmp/mpstat_out.txt &
-  wait
-) 2>/dev/null
-```
-
-Then analyze the collected data:
-
-```bash
-echo "=== vmstat (key columns: r=runnable, b=blocked, wa=iowait) ==="
-awk 'NR<=2 || /^[0-9]/' /tmp/vmstat_out.txt | head -15
-
-echo "=== iostat (key: %util>90%, await>20ms indicates bottleneck) ==="
-awk '/^Device/ || /^dm-|^vd|^sd/ {print}' /tmp/iostat_out.txt | head -30
-
-echo "=== mpstat iowait per CPU ==="
-awk '$3 ~ /^[0-9]+$/ && $6 > 5 {print "CPU " $3 ": iowait=" $6 "%"}' /tmp/mpstat_out.txt | sort -u
-```
-
-### Step 3: Blocked Process Analysis
-
-```bash
-echo "=== Blocked Processes (state D=uninterruptible I/O wait, S=interruptible) ==="
-ps -eo pid,comm,state,wchan:32 | awk '$3 ~ /^[DS]$/ {print}' | head -20
-```
-
-### Step 4: Page Cache Pressure Analysis
-
-```bash
-echo "=== Page Cache Pressure ==="
-cat /proc/sys/vm/vfs_cache_pressure
-```
+**Output**:
+- System overview (CPU, memory, disk devices)
+- I/O scheduler and queue configuration (scheduler, nr_requests, rotational, etc.)
+- Memory/page cache settings (vfs_cache_pressure, swappiness, dirty parameters)
+- Filesystem mount options (barrier, atime, data mode)
+- LVM/MD RAID status (if applicable)
+- 15-second vmstat, iostat, pidstat, mpstat dynamic metrics
 
 ---
 
-## Output Format
+## Phase 2: Key Metrics Analysis
 
-Based on collected data, determine:
+### Key Metrics to Analyze
+
+| Category | Key Metrics | Anomaly Detection |
+|----------|-------------|-------------------|
+| CPU I/O Wait | %iowait, %user, r (runnable), b (blocked) | %iowait > 20% (elevated); > 30% (critical); r > CPU_count*4 (severe queueing) |
+| Disk Utilization | %util, await, avgqu-sz, r/s, w/s, rkB/s, wkB/s | %util > 70% (elevated); > 90% (critical); await > 20ms (elevated); > 100ms (critical); avgqu-sz > 4 (elevated); > 16 (critical) |
+| Disk Saturation | aqu-sz, w_await, r_await | aqu-sz > 4 (elevated); > 16 (critical); w_await/r_await > 50ms (high latency) |
+| I/O Pattern | rrqm/s+wrqm/s merge rate, avgrq-sz, inferred pattern | Sequential: merge>30% + avgrq>32; Random: merge<10% + avgrq<16; MIXED: otherwise |
+| Readahead Match | read_ahead_kb vs observed avgrq-sz | read_ahead_kb >> avgrq-sz (wasted prefetch); read_ahead_kb << avgrq-sz (insufficient prefetch); optimal: read_ahead_kb ≈ avgrq-sz * 2 |
+| Swap Activity | si, so, swpd | si > 0 (swap in); so > 0 (swap out); swpd > 50% of memory (heavy swap) |
+| Memory PSI | memory stall % (some avg10, full avg10) | some avg10 > 30% (elevated); > 50% (critical); full avg10 > 50% (sustained pressure) |
+| Blocked Processes | D-state count, S-state count, wchan patterns | D-state > CPU_count (critical); same wchan > 10 (contention) |
+| Page Cache Pressure | pgscank/s, pgscand/s, pgfree/s | pgscank/s > 1000 (kswapd aggressive); pgscand/s > 1000 (direct reclaim storm) |
+| Process I/O | iodelay, %wa per process (pidstat) | iodelay > 10ms (elevated); %wa > 30% (process I/O bound) |
+| NFS/Network Storage | retrans rate, sync/async mount | Retrans > 2% (network issue); sync mount (high latency) |
+
+---
+
+## Phase 3: Bottleneck Identification
+
+### Output Format
 
 ```markdown
 # OS I/O Bottleneck Analysis Report
 
 ## I/O Bottleneck Conclusion
-
 **OS I/O Bottleneck Status**: [EXISTS / DOES NOT EXIST]
 
 ## Key Evidence
-
 | Metric | Observed Value | Threshold | Status |
 |--------|---------------|-----------|--------|
 | CPU iowait % | X% | >20% | [CRITICAL/ELEVATED/NORMAL] |
@@ -100,7 +72,7 @@ Based on collected data, determine:
 ## Bottleneck Type
 | Type | Severity | Evidence |
 |------|----------|----------|
-| [Disk Saturation/CPU iowait/Memory/Swap] | [High/Medium/Low] | [Description] |
+| [Disk Saturation/CPU iowait/Page Cache] | [High/Medium/Low] | [Description] |
 
 ## Root Cause Inference
 **Primary Cause**: [OS-level root cause]
@@ -114,18 +86,9 @@ Based on collected data, determine:
 
 ---
 
-## Key Thresholds
+## Operational Notes
 
-| Indicator | Critical | Elevated | Normal |
-|-----------|----------|----------|--------|
-| CPU iowait % | >30% | 10-30% | <10% |
-| Disk %util | >90% | 70-90% | <70% |
-| Blocked processes | >CPU count | CPU_count/2 to CPU_count | <CPU_count/2 |
-| IO await (ms) | >100ms | 20-100ms | <20ms |
-| Queue size (aqu-sz) | >16 | 4-16 | <4 |
-
----
-
-## Reference
-
-see [references/io_analysis_report_example.md] for complete report example.
+- **basic principle**: All analysis must be specific and evidence-based.
+- **Iteration**: If evidence is insufficient, narrow focus and deepen analysis.
+- **Completion**: All phases must be fully executed before concluding.
+- **Scope Constraint — OS Level Only**: This skill analyzes ONLY OS-level information. Do NOT collect or interpret application-layer data.
