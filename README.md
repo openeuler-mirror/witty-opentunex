@@ -51,11 +51,14 @@ opencode安装&使用参考文档：https://opencode.ai/docs/zh-cn/
 安装调优skills:
 ```sh
 mkdir -p ~/.config/opencode/skills/
-cp -r skills/* ~/.config/opencode/skills/
-# Skills目录结构：
+# 遍历每个skill目录，安装到skills/根目录（跳过分类目录）
+for skill in skills/*/*/; do
+    cp -r "$skill" ~/.config/opencode/skills/
+done
+# Skills目录结构（repo内分类，仅用于组织）：
 #   bottleneck/     - 瓶颈分析 (top-down, io, mem, net, lock, sched, application)
-#   optimization/  - 性能优化 (os, application, inference, benchmark, enablement)
-#   auxiliary/     - 辅助功能 (remote-execution)
+#   optimization/  - 性能优化 (os, application, inference)
+#   auxiliary/     - 辅助功能 (remote-execution, benchmark, enablement)
 ```
 
 安装 opentunex-assistant agent：
