@@ -1,13 +1,17 @@
 #!/bin/bash
 # collect_io_metrics.sh - Collect I/O metrics for bottleneck analysis
-# Usage: collect_io_metrics.sh [duration in seconds]
+# Usage: collect_io_metrics.sh [duration in seconds] [PID]
 
 DURATION=${1:-15}
+TARGET_PID=${2:-}
 INTERVAL=1
 
 echo "=== I/O Metrics Collection ==="
 echo "Duration: $DURATION seconds"
 echo "Interval: $INTERVAL second"
+if [ -n "$TARGET_PID" ]; then
+    echo "Target PID: $TARGET_PID"
+fi
 echo ""
 
 # System overview
@@ -48,6 +52,28 @@ echo "dirty_writeback_centisecs: $(cat /proc/sys/vm/dirty_writeback_centisecs)"
 echo "dirty_expire_centisecs: $(cat /proc/sys/vm/dirty_expire_centisecs)"
 echo "min_free_kbytes: $(cat /proc/sys/vm/min_free_kbytes)"
 echo "page-cluster: $(cat /proc/sys/vm/page-cluster)"
+echo "overcommit_memory: $(cat /proc/sys/vm/overcommit_memory)"
+echo "overcommit_ratio: $(cat /proc/sys/vm/overcommit_ratio)"
+echo "oom_dump_tasks: $(cat /proc/sys/vm/oom_dump_tasks)"
+echo ""
+
+# Process IO priority (if PID provided)
+if [ -n "$TARGET_PID" ] && [ -d "/proc/$TARGET_PID" ]; then
+    echo "=== Target Process IO Priority ==="
+    echo "PID: $TARGET_PID"
+    ionice -p $TARGET_PID 2>/dev/null || echo "ionice not available"
+    echo "IO scheduler: $(cat /proc/$TARGET_PID/io_sched 2>/dev/null || echo 'N/A')"
+    echo ""
+fi
+
+# cgroup IO weight
+echo "=== cgroup IO Weight ==="
+if [ -f /sys/fs/cgroup/blkio/blkio.weight ]; then
+    echo "blkio.weight: $(cat /sys/fs/cgroup/blkio/blkio.weight 2>/dev/null || echo 'N/A')"
+fi
+if [ -f /sys/fs/cgroup/io.io_weight ]; then
+    echo "io.io_weight: $(cat /sys/fs/cgroup/io.io_weight 2>/dev/null || echo 'N/A')"
+fi
 echo ""
 
 # Filesystem mount options
@@ -60,6 +86,17 @@ echo "=== NFS Mount Options ==="
 mount | grep -E 'nfs|cifs' | head -10
 echo ""
 
+# ext4 journal configuration
+echo "=== ext4 Journal Configuration ==="
+for fs in $(mount | grep ext4 | awk '{print $1}' | head -5); do
+    dev=$(basename $fs)
+    if [ -b "/dev/$dev" ] || [ -f "/dev/$dev" ]; then
+        echo "--- $fs ---"
+        tune2fs -l $fs 2>/dev/null | grep -E "Journal device|Journal size|Commit interval" | head -5 || echo "tune2fs not available"
+    fi
+done
+echo ""
+
 # Disk IRQ affinity
 echo "=== Disk IRQ Affinity (first 5 disks) ==="
 for dev in $(lsblk -d -n -o NAME | grep -E '^vd|^sd|^nvme' | head -5); do
@@ -68,6 +105,29 @@ for dev in $(lsblk -d -n -o NAME | grep -E '^vd|^sd|^nvme' | head -5); do
         echo "/dev/$dev IRQ: $(cat /proc/irq/$(basename $irq)/smp_affinity 2>/dev/null || echo 'N/A')"
     fi
 done
+echo ""
+
+# blk-mq configuration
+echo "=== blk-mq Configuration ==="
+for dev in $(lsblk -d -n -o NAME | grep -E '^vd|^sd|^nvme' | head -5); do
+    if [ -d /sys/block/$dev/mq ]; then
+        echo "--- /dev/$dev ---"
+        echo "hw_queue_depth: $(cat /sys/block/$dev/mq/hw_queue_depth 2>/dev/null || echo 'N/A')"
+        echo "numa_node: $(cat /sys/block/$dev/numa_node 2>/dev/null || echo 'N/A')"
+    fi
+done
+echo ""
+
+# Extended disk stats
+echo "=== Extended Disk Stats (/proc/diskstats) ==="
+awk '$3 !~ /[0-9]$/ && $3 !~ /^loop|^ram/ {print}' /proc/diskstats | head -20
+echo ""
+
+# IO throttling (cgroup)
+echo "=== IO Throttling (cgroup blkio) ==="
+if [ -f /sys/fs/cgroup/blkio/blkio.throttle.read_bps_device ]; then
+    cat /sys/fs/cgroup/blkio/blkio.throttle.read_bps_device 2>/dev/null | head -10
+fi
 echo ""
 
 # LVM if applicable

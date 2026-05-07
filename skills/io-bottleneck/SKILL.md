@@ -24,9 +24,14 @@ This skill performs OS-level I/O performance bottleneck analysis.
 **Output**:
 - System overview (CPU, memory, disk devices)
 - I/O scheduler and queue configuration (scheduler, nr_requests, rotational, etc.)
-- Memory/page cache settings (vfs_cache_pressure, swappiness, dirty parameters)
-- Filesystem mount options (barrier, atime, data mode)
+- blk-mq configuration (hw_queue_depth, numa_node)
+- Extended disk stats (/proc/diskstats)
+- Memory/page cache settings (vfs_cache_pressure, swappiness, dirty parameters, overcommit)
+- Target process IO priority (ionice, if PID provided)
+- cgroup IO weight (blkio.weight, io.io_weight)
+- Filesystem mount options and journal config (ext4)
 - LVM/MD RAID status (if applicable)
+- Disk IRQ affinity and cgroup IO throttling
 - 15-second vmstat, iostat, pidstat, mpstat dynamic metrics
 
 ---
@@ -42,11 +47,14 @@ This skill performs OS-level I/O performance bottleneck analysis.
 | Disk Saturation | aqu-sz, w_await, r_await | aqu-sz > 4 (elevated); > 16 (critical); w_await/r_await > 50ms (high latency) |
 | I/O Pattern | rrqm/s+wrqm/s merge rate, avgrq-sz, inferred pattern | Sequential: merge>30% + avgrq>32; Random: merge<10% + avgrq<16; MIXED: otherwise |
 | Readahead Match | read_ahead_kb vs observed avgrq-sz | read_ahead_kb >> avgrq-sz (wasted prefetch); read_ahead_kb << avgrq-sz (insufficient prefetch); optimal: read_ahead_kb ≈ avgrq-sz * 2 |
-| Swap Activity | si, so, swpd | si > 0 (swap in); so > 0 (swap out); swpd > 50% of memory (heavy swap) |
-| Memory PSI | memory stall % (some avg10, full avg10) | some avg10 > 30% (elevated); > 50% (critical); full avg10 > 50% (sustained pressure) |
+| Swap Activity | si, so, swpd; driven by memory PSI pressure | si > 0 (swap in); so > 0 (swap out); swpd > 50% of memory (heavy swap); competes with application IO |
+| Memory PSI | memory stall % (some avg10, full avg10); PSI = Pressure Stall Information (some=partial stall, full=complete stall); indicates memory pressure causing indirect IO (swap, page cache churn, direct reclaim blocking) | some avg10 > 30% (elevated); > 50% (critical); full avg10 > 50% (sustained pressure) |
+| Memory Overcommit | overcommit_memory, overcommit_ratio | overcommit_memory=2 (never) is safest; overcommit_ratio > 50 (risky) |
 | Blocked Processes | D-state count, S-state count, wchan patterns | D-state > CPU_count (critical); same wchan > 10 (contention) |
 | Page Cache Pressure | pgscank/s, pgscand/s, pgfree/s | pgscank/s > 1000 (kswapd aggressive); pgscand/s > 1000 (direct reclaim storm) |
-| Process I/O | iodelay, %wa per process (pidstat) | iodelay > 10ms (elevated); %wa > 30% (process I/O bound) |
+| Process I/O | iodelay, %wa per process (pidstat), ionice class, blkio.weight | iodelay > 10ms (elevated); %wa > 30% (process I/O bound); ionice=idle (throttled); blkio.weight=100 (low priority) |
+| IO Throttling | cgroup blkio.throttle, io.latency, cgroup IO weight | throttled processes showing high wait time; io.weight indicates cgroup priority |
+| Filesystem Journal | ext4 journal size, commit interval | journal > 1GB (excessive); commit interval > 15s (high latency risk) |
 | NFS/Network Storage | retrans rate, sync/async mount | Retrans > 2% (network issue); sync mount (high latency) |
 
 ---
