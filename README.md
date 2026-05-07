@@ -52,8 +52,10 @@ opencode安装&使用参考文档：https://opencode.ai/docs/zh-cn/
 ```sh
 mkdir -p ~/.config/opencode/skills/
 cp -r skills/* ~/.config/opencode/skills/
-# 或创建软链接
-# for skill in skills/*; do ln -s $(pwd)/${skill} ~/.config/opencode/skills/; done
+# Skills目录结构：
+#   bottleneck/     - 瓶颈分析 (top-down, io, mem, net, lock, sched, application)
+#   optimization/  - 性能优化 (os, application, inference, benchmark, enablement)
+#   auxiliary/     - 辅助功能 (remote-execution)
 ```
 
 安装 opentunex-assistant agent：
