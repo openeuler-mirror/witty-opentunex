@@ -5,93 +5,56 @@ description: OS-level Memory bottleneck analysis. Analyzes memory utilization, s
 
 # OS Memory Bottleneck Analysis
 
-This skill analyzes OS-level memory performance bottlenecks, including memory-access-intensive scenarios where memory usage is low but memory bandwidth or NUMA access patterns cause performance issues.
-
-First try to read from user-given data collection files, if data is not enough, provides script to user to conduct supplementary collection.
+This skill performs OS-level memory performance bottleneck analysis, including memory-access-intensive scenarios where memory usage is low but memory bandwidth or NUMA access patterns cause performance issues.
 
 ---
 
-## Scope Limitation
+## Analysis Command Execution
 
-1. **OS Components Only**: Analyzes only OS-native kernel components (Memory Management, Slab Allocator, NUMA, Virtual Memory, Page Cache, Memory Controller)
-2. **No Application-Level Analysis**: Results show only OS-level bottlenecks
-3. **Results**: Contain only OS-level bottleneck indicators and optimization suggestions
+[1] only if **USER** has specified that remote command execution are allowed, Load the `remote-execution` skill for standardized SSH connection and command execution.
 
----
-
-## Client Connection
-
-skill:remote-execution
+[2] otherwise, Keep the following rule for command execution: Always read from user-given data collection files to analyze, command execution results should be saved in these files, if some extra commands are needed for analysis, output command execution script to **USER**, and ask **USER** to provide execution results, never execute command automatically.
 
 ---
 
-## Analysis Steps
+## Phase 1: Data Collection
 
-### Step 1: PSI Memory Pressure Analysis
-
-```bash
-echo "=== Memory Pressure Level (PSI) ===" && if [ -f /proc/pressure/mem ]; then cat /proc/pressure/mem; else echo "pressure not available"; fi
-```
-
-### Step 2: OOM Event Analysis
-
-```bash
-echo "=== VM OOM Stats ===" && cat /proc/vmstat | grep -E 'oom|pgmajfault'
-```
-
-```bash
-echo "=== Recent OOM Events ===" && dmesg -T 2>/dev/null | grep -iE 'out of memory|oom kill' | tail -10 || journalctl -k 2>/dev/null | grep -iE 'out of memory|oom kill' | tail -10
-```
-
-### Step 3: Swap Configuration Analysis
-
-```bash
-echo "=== Swap Configuration ===" && swapon -s 2>/dev/null || cat /proc/swaps
-```
-
-### Step 4: Slab and Vmalloc Analysis
-
-```bash
-echo "=== Slab Memory Detail ===" && cat /proc/slabinfo 2>/dev/null | head -30
-```
-
-```bash
-echo "=== Vmalloc Region ===" && cat /proc/meminfo | grep -E "VmallocTotal|VmallocUsed"
-```
-
-### Step 5: NUMA Statistics Analysis
-
-```bash
-echo "=== NUMA Hit/Miss Stats ===" && cat /proc/vmstat | grep -E "numa_hit|numa_miss|numa_foreign|numa_local|numa_other" | head -20
-```
-
-```bash
-echo "=== NUMA Policy ===" && if command -v numactl &>/dev/null; then numactl --policy; else echo "numactl not installed"; fi
-```
-
-```bash
-echo "=== Memory Binding ===" && cat /proc/self/status | grep -E "Mems_allowed|Mems_allowed_node"
-```
-
-### Step 6: Per-Process NUMA Hints
-
-```bash
-echo "=== Per-Process NUMA Info ===" && if [ -f /proc/self/sched ]; then cat /proc/self/sched 2>/dev/null | head -10; else echo "per-process NUMA info not available"; fi
-```
+**Collection Command**: Run `scripts/collect_mem_metrics.sh` to collect memory metrics.
 
 ---
 
-## Output Format
+## Phase 2: Key Metrics Analysis
 
-Based on collected data, determine:
+### Key Metrics to Analyze
+
+| Category | Key Metrics | Anomaly Detection |
+|----------|-------------|-------------------|
+| Memory Capacity | Memory Used%, MemAvailable%, Swap Used, Committed_AS% | Memory Used > 85% (elevated); > 95% (critical); MemAvailable < 15% (elevated); < 5% (critical); Swap Used > 0 (elevated); Committed_AS > 100% (overcommit risk) |
+| Memory PSI | memory stall % (some avg10, full avg10) | some avg10 > 30% (elevated); > 50% (critical); full avg10 > 50% (sustained pressure) |
+| Page Faults | majflt/s, pgscank/s, pgscand/s | majflt/s > 100 (elevated); > 1000 (critical swap thrashing); pgscank/s > 1000 (kswapd aggressive); pgscand/s > 1000 (direct reclaim storm) |
+| Memory Allocation/Reclaim | pgalloc, pgfree, pgfault, pgsteal; Active/Inactive ratio | pgfault > 10000/s (allocation pressure); Active/Inactive < 1 (memory pressure); pgsteal > 5000 (reclaim overhead) |
+| Slab Allocator | Slab%, SUnreclaim%, slabinfo top consumers | Slab > 30% (elevated); > 50% (critical); SUnreclaim > 70% of Slab (kernel memory fragmentation) |
+| HugePages | nr_hugepages, HugePages_Free vs Total, Hugepagesize, transparent_hugepage | HugePages_Free = Total (never used, wasted); Free > 50% of Total (over-provisioned); transparent_hugepage=always (performance variance) |
+| OOM | oom_kill_allocating_task, oom_dump_tasks | oom_kill_allocating_task=1 (kill cause, not victim) |
+| KSM (Kernel Samepage Merging) | ksm.run, pages_shared, pages_sharing | pages_sharing >> pages_shared (effective deduplication) |
+| NUMA Balancing | numa_balancing enabled | numa_balancing=1 (auto NUMA awareness); =0 (disable) |
+| Memory CGroup | memory.limit_in_bytes, soft_limit vs usage | usage close to limit (cgroup pressure) |
+| Memory Watermarks | watermark_scale_factor | >10 (aggressive reclaim); <3 (latency-sensitive) |
+| jemalloc | MALLOC_ARENA_MAX, arena count vs CPU count | arena > 4x CPU count (jemalloc fragmentation); jemalloc dirty not released |
+| NUMA Access | numa_hit, numa_miss, numa_foreign, cross-NUMA ratio, node distances | numa_miss > 20% (elevated); > 30% (critical); cross-NUMA ratio > 30% (elevated); > 50% (critical); node distance > 30 (remote access penalty) |
+
+---
+
+## Phase 3: Bottleneck Identification
+
+### Output Format
 
 ```markdown
 # OS Memory Bottleneck Analysis Report
 
 ## Memory Bottleneck Conclusion
-
 **OS Memory Bottleneck Status**: [EXISTS / DOES NOT EXIST]
-**Bottleneck Subtype**: [Memory Capacity/Memory Access Intensity/NUMA Access Pattern/Cluster Access Pattern]
+**Bottleneck Subtype**: [Memory Capacity/Memory Access Intensity/NUMA Access Pattern]
 
 ## Key Evidence
 
@@ -106,25 +69,24 @@ Based on collected data, determine:
 ### Memory Access Intensity Metrics
 | Metric | Observed Value | Threshold | Status |
 |--------|---------------|-----------|--------|
-| CPU Sys % | X% | >30% | [CRITICAL/ELEVATED/NORMAL] |
-| Context Switches/s | X | >10000 | [CRITICAL/ELEVATED/NORMAL] |
-| Interrupts/s | X | >10000 | [CRITICAL/ELEVATED/NORMAL] |
-| Page Faults/s | X | >5000 | [CRITICAL/ELEVATED/NORMAL] |
+| majflt/s | X | >100 | [CRITICAL/ELEVATED/NORMAL] |
+| pgscank/s | X | >1000 | [CRITICAL/ELEVATED/NORMAL] |
+| pgscand/s | X | >1000 | [CRITICAL/ELEVATED/NORMAL] |
 
-### NUMA/Cluster Access Metrics
+### NUMA Access Metrics
 | Metric | Observed Value | Threshold | Status |
 |--------|---------------|-----------|--------|
 | NUMA Miss % | X% | >20% | [CRITICAL/ELEVATED/NORMAL] |
-| Cross-NUMA Access | X | High | [CRITICAL/ELEVATED/NORMAL] |
+| Cross-NUMA Access | X | >30% | [CRITICAL/ELEVATED/NORMAL] |
 
 ## Bottleneck Type
 | Type | Severity | Evidence |
 |------|----------|----------|
-| [Memory Saturation/Memory Access Intensity/NUMA Access/Cluster Access] | [High/Medium/Low] | [Description] |
+| [Memory Saturation/NUMA Access/Slab Pressure] | [High/Medium/Low] | [Description] |
 
 ## Root Cause Inference
 **Primary Cause**: [OS-level root cause]
-**Affected Components**: [e.g., Memory Management, NUMA Subsystem, Memory Controller]
+**Affected Components**: [e.g., Memory Management, NUMA Subsystem]
 **Inference Confidence**: [High/Medium/Low]
 
 ## OS-Level Recommendations
@@ -134,33 +96,9 @@ Based on collected data, determine:
 
 ---
 
-## Key Thresholds
+## Operational Notes
 
-### Memory Capacity
-| Indicator | Critical | Elevated | Normal |
-|-----------|----------|----------|--------|
-| Memory Used % | >95% | 85-95% | <85% |
-| MemAvailable % | <5% | 5-15% | >15% |
-| Swap Used | >1GB | 100MB-1GB | ~0 |
-| Committed_AS % | >100% | 95-100% | <95% |
-
-### Memory Access Intensity
-| Indicator | Critical | Elevated | Normal |
-|-----------|----------|----------|--------|
-| CPU Sys % | >40% | 20-40% | <20% |
-| Context Switches/s | >15000 | 8000-15000 | <8000 |
-| Interrupts/s | >15000 | 8000-15000 | <8000 |
-| majflt/s | >100 | 20-100 | <20 |
-| CPU wa (iowait) % | >30% | 10-30% | <10% |
-
-### NUMA/Cluster Access
-| Indicator | Critical | Elevated | Normal |
-|-----------|----------|----------|--------|
-| NUMA Miss % | >30% | 10-30% | <10% |
-| Cross-NUMA Access | >30% of memory ops | 10-30% | <10% |
-
----
-
-## Reference
-
-see [references/mem_analysis_report_example.md] for complete report example.
+- **basic principle**: All analysis must be specific and evidence-based.
+- **Iteration**: If evidence is insufficient, narrow focus and deepen analysis.
+- **Completion**: All phases must be fully executed before concluding.
+- **Scope Constraint — OS Level Only**: This skill analyzes ONLY OS-level information. Do NOT collect or interpret application-layer data.
