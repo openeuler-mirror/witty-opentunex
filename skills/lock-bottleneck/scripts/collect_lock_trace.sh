@@ -1,95 +1,86 @@
 #!/bin/bash
-# Collect OS lock trace data from remote machine via SSH
-# Usage: collect_lock_trace.sh <user@host> [duration]
+# collect_lock_trace.sh - Collect lock trace data for bottleneck analysis
+# Usage: collect_lock_trace.sh [duration] [PID]
 
-set -e
+DURATION=${1:-15}
+TARGET_PID=${2:-}
 
-REMOTE_HOST=${1:-}
-DURATION=${2:-30}
-WORK_DIR="/tmp/lock_analysis_$(date +%s)"
+echo "=== Lock Trace Collection ==="
+echo "Duration: $DURATION seconds"
+if [ -n "$TARGET_PID" ]; then
+    echo "Target PID: $TARGET_PID"
+fi
+echo ""
 
-if [ -z "$REMOTE_HOST" ]; then
-  echo "Usage: $0 <user@host> [duration]"
-  echo "Example: $0 root@192.168.1.100 30"
-  exit 1
+# Lock tracing prerequisites
+echo "=== Lock Tracing Prerequisites ==="
+echo "perf_event_paranoid: $(cat /proc/sys/kernel/perf_event_paranoid)"
+echo "lock_stat: $(cat /proc/sys/kernel/lock_stat 2>/dev/null || echo 'N/A')"
+echo "sched_schedstats: $(cat /proc/sys/kernel/sched_schedstats 2>/dev/null || echo 'N/A')"
+echo ""
+
+# System lock configuration
+echo "=== System Lock Configuration ==="
+echo "futex_wake_mac: $(cat /proc/sys/kernel/futex_wake_mac 2>/dev/null || echo 'N/A')"
+echo "futex_ping_latency: $(cat /proc/sys/kernel/futex_ping_latency 2>/dev/null || echo 'N/A')"
+echo "sched_autogroup_enabled: $(cat /proc/sys/kernel/sched_autogroup_enabled 2>/dev/null || echo 'N/A')"
+echo "sched_child_runs_first: $(cat /proc/sys/kernel/sched_child_runs_first 2>/dev/null || echo 'N/A')"
+echo "sched_latency_ns: $(cat /proc/sys/kernel/sched_latency_ns 2>/dev/null || echo 'N/A')"
+echo "sched_min_granularity_ns: $(cat /proc/sys/kernel/sched_min_granularity_ns 2>/dev/null || echo 'N/A')"
+echo "sched_wakeup_granularity_ns: $(cat /proc/sys/kernel/sched_wakeup_granularity_ns 2>/dev/null || echo 'N/A')"
+echo "sched_tunable_scaling: $(cat /proc/sys/kernel/sched_tunable_scaling 2>/dev/null || echo 'N/A')"
+echo ""
+
+# RCU configuration
+echo "=== RCU Configuration ==="
+echo "rcu_cpu_stall_suppress: $(cat /proc/sys/kernel/rcu_cpu_stall_suppress 2>/dev/null || echo 'N/A')"
+echo "rcu_normal: $(cat /proc/sys/kernel/rcu_normal 2>/dev/null || echo 'N/A')"
+echo ""
+
+# Lockup detection
+echo "=== Lockup Detection ==="
+echo "softlockup_panic: $(cat /proc/sys/kernel/softlockup_panic 2>/dev/null || echo 'N/A')"
+echo "nmi_watchdog: $(cat /proc/sys/kernel/nmi_watchdog 2>/dev/null || echo 'N/A')"
+echo ""
+
+# CPU isolation
+echo "=== CPU Isolation ==="
+echo "isolcpus: $(cat /proc/cmdline 2>/dev/null | grep -o 'isolcpus=[^ ]*' || echo 'N/A')"
+echo "nohz_full: $(cat /proc/cmdline 2>/dev/null | grep -o 'nohz_full=[^ ]*' || echo 'N/A')"
+echo ""
+
+# Kernel lock statistics
+echo "=== Kernel Lock Statistics ==="
+cat /proc/lock_stat 2>/dev/null | head -50 || echo "lock_stat: not available (requires root)"
+echo ""
+
+# File locks
+echo "=== File Locks ==="
+cat /proc/locks 2>/dev/null | head -30 || echo "locks: not available"
+echo ""
+
+# Softirq activity
+echo "=== Softirq Activity ==="
+cat /proc/softirqs 2>/dev/null | head -20
+echo ""
+
+# Target process info
+if [ -n "$TARGET_PID" ] && [ -d "/proc/$TARGET_PID" ]; then
+    echo "=== Target Process Info (PID: $TARGET_PID) ==="
+    ps -T -p $TARGET_PID 2>/dev/null || echo "Process not found"
+    cat /proc/$TARGET_PID/status 2>/dev/null | grep -E "State|Threads|VmRSS" || echo "Cannot read process"
+    echo "wchan: $(cat /proc/$TARGET_PID/wchan 2>/dev/null || echo 'N/A')"
+    cat /proc/$TARGET_PID/stack 2>/dev/null | head -20 || echo "Cannot read stack"
+    echo ""
 fi
 
-echo "=== Remote Lock Trace Collection ==="
-echo "Remote host: $REMOTE_HOST"
-echo "Duration: ${DURATION}s"
-echo "Work directory: $WORK_DIR"
+# Blocked processes
+echo "=== Blocked Processes (D=uninterruptible, S=interruptible) ==="
+ps -eo state,wchan:32,pid,comm | awk '/^[DS]/ {print}' | sort | uniq -c | sort -rn | head -20
 echo ""
 
-# Check SSH connection
-echo "[1/5] Checking SSH connection..."
-ssh -t $REMOTE_HOST "echo 'SSH connection OK'" || {
-  echo "Error: SSH connection failed"
-  echo "Please ensure:"
-  echo "  - SSH is accessible"
-  echo "  - Passwordless SSH is configured (ssh-copy-id)"
-  exit 1
-}
-echo "   SSH connection OK"
+echo "=== Wait Channel Breakdown ==="
+ps -eo state,wchan:32 | awk '/^[DS]$/ {print $2}' | sort | uniq -c | sort -rn | head -20
 echo ""
 
-# Create working directory
-echo "[2/5] Creating working directory..."
-ssh -t $REMOTE_HOST "mkdir -p $WORK_DIR"
-echo "   Working directory created: $WORK_DIR"
-echo ""
-
-# Record perf data with futex and scheduling events
-echo "[3/5] Recording perf lock and scheduling data..."
-echo "   This will take ${DURATION} seconds..."
-echo "   Command: perf record -a -e syscalls:sys_enter_futex -e syscalls:sys_exit_futex -e sched:sched_switch -e sched:sched_wakeup -- sleep ${DURATION}"
-
-ssh -t $REMOTE_HOST "cd $WORK_DIR && perf record -a -e syscalls:sys_enter_futex -e syscalls:sys_exit_futex -e sched:sched_switch -e sched:sched_wakeup -e sched:sched_wakeup_new -e sched:sched_migrate_task -- sleep ${DURATION} > /dev/null 2>&1" || {
-  echo "Error: perf record failed"
-  ssh -t $REMOTE_HOST "rm -rf $WORK_DIR"
-  exit 1
-}
-echo "   Recording completed"
-echo ""
-
-# Collect system state
-echo "[4/5] Collecting system state..."
-
-# Collect vmstat baseline
-ssh -t $REMOTE_HOST "vmstat 1 ${DURATION} > $WORK_DIR/vmstat.log" &
-
-# Collect pidstat
-ssh -t $REMOTE_HOST "pidstat -w 1 ${DURATION} > $WORK_DIR/pidstat.log" &
-
-# Collect process state
-ssh -t $REMOTE_HOST "ps -eo pid,comm,state,wchan:32,cmd > $WORK_DIR/process_state.log" &
-
-# Collect softirqs
-ssh -t $REMOTE_HOST "cat /proc/softirqs > $WORK_DIR/softirqs.log" &
-
-# Collect locks
-ssh -t $REMOTE_HOST "cat /proc/locks > $WORK_DIR/locks.log" &
-
-wait
-echo "   System state collected"
-echo ""
-
-# Check result
-echo "[5/5] Checking collected data..."
-DATA_SIZE=$(ssh -t $REMOTE_HOST "ls -lh $WORK_DIR/perf.data" | awk '{print \$5}')
-echo "   Data size: $DATA_SIZE"
-echo ""
-
-# Return data location
 echo "=== Collection Complete ==="
-echo "Remote data location: $REMOTE_HOST:$WORK_DIR/"
-echo ""
-echo "To analyze on remote machine:"
-echo "  ssh -t $REMOTE_HOST 'cd $WORK_DIR && perf sched latency'"
-echo "  ssh -t $REMOTE_HOST 'cd $WORK_DIR && perf sched timehist | head -100'"
-echo "  ssh -t $REMOTE_HOST 'cd $WORK_DIR && perf script | grep futex | head -100'"
-echo ""
-echo "To analyze lock contention:"
-echo "  ssh -t $REMOTE_HOST 'cd $WORK_DIR && sh analyze_lock_contention.sh'"
-echo ""
-echo "To cleanup:"
-echo "  ssh -t $REMOTE_HOST 'rm -rf $WORK_DIR'"
