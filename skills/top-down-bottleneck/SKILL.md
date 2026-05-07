@@ -165,8 +165,8 @@ Map identified bottleneck types to specialized skills:
 | Connection exhaustion (TIME_WAIT > 5000) | **net-bottleneck** |
 | High context switches with futex wait | **lock-bottleneck** |
 | Processes in D/S state with lock wchan | **lock-bottleneck** |
-| Scheduling latency outliers (max delay > 100ms) | **schedule-trace-analysis** |
-| CPU contention (preemption > threshold) | **schedule-trace-analysis** |
+| Scheduling latency outliers (max delay > 100ms) | **sched-bottleneck** |
+| CPU contention (preemption > threshold) | **sched-bottleneck** |
 
 ### Step 5.2: Invoke Specialized Skills
 
@@ -222,8 +222,8 @@ skill:lock-bottleneck
 **For Scheduling Issues:**
 
 ```bash
-# Invoke schedule-trace-analysis skill
-skill:schedule-trace-analysis
+# Invoke sched-bottleneck skill
+skill:sched-bottleneck
 # Focus areas:
 # - Scheduling latency distribution (P50/P90/P95/P99)
 # - Preemptor identification and impact

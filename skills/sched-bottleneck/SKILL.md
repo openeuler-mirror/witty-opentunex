@@ -1,11 +1,11 @@
 ---
-name: schedule-trace-analysis
-description: Process scheduling trace analysis using perf to analyze target business process scheduling behavior, including scheduling out frequency, scheduling in latency, and preempting tasks identification with global scheduling perspective.
+name: sched-bottleneck
+description: OS-level scheduling bottleneck analysis. Analyzes scheduling latency, preemption patterns, wakeup latency, and run queue contention using perf sched tools.
 ---
 
-# Process Scheduling Trace Analysis
+# OS Scheduling Bottleneck Analysis
 
-This skill performs process scheduling trace analysis using perf tools.
+This skill performs scheduling trace analysis using perf tools.
 
 ---
 
@@ -19,7 +19,7 @@ This skill performs process scheduling trace analysis using perf tools.
 
 ## Phase 1: Data Collection
 
-**Collection Command**: Run `scripts/collect_sched_trace_metrics.sh [PID] [DURATION]` to collect and analyze scheduling trace data (default 5 seconds, PID optional).
+**Collection Command**: Run `scripts/collect_sched_metrics.sh [PID] [DURATION]` to collect and analyze scheduling trace data (default 5 seconds, PID optional).
 
 ---
 
