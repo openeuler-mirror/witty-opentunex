@@ -76,7 +76,7 @@ iostat -x | grep -E "Device|sda|vda"
 
 | Bottleneck Type | Relevant Skills |
 |-----------------|----------------|
-| CPU | top-down-bottleneck, schedule-trace-analysis |
+| CPU | top-down-bottleneck, sched-bottleneck |
 | Memory | mem-bottleneck |
 | I/O | io-bottleneck |
 | Network | net-bottleneck |
