@@ -12,7 +12,6 @@
 #   serialized within this script.
 # =============================================================================
 
-set -euo pipefail
 
 if [ -z "${1:-}" ]; then
     echo "Usage: bash phase3.2-syscall-analysis.sh <PID>" >&2

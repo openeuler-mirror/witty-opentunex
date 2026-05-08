@@ -11,7 +11,6 @@
 # ⚠️ Must run AFTER phase3 completes (perf record/strace also use PMU).
 # =============================================================================
 
-set -euo pipefail
 
 if [ -z "${1:-}" ]; then
     echo "Usage: bash phase4-microarch.sh <PID>" >&2

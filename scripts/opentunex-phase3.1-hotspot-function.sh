@@ -10,7 +10,6 @@
 #   on the same PID.
 # =============================================================================
 
-set -euo pipefail
 
 if [ -z "${1:-}" ]; then
     echo "Usage: bash phase3.1-hotspot-function.sh <PID>" >&2

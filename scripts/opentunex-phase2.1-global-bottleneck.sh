@@ -7,7 +7,6 @@
 # Total runtime: ~30 seconds (5s sampling × 4 resource categories, sequential).
 # =============================================================================
 
-set -euo pipefail
 
 echo "============================================================"
 echo "Phase 2.1: Global Resource Bottleneck Identification"

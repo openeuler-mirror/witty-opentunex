@@ -7,7 +7,6 @@
 # All commands are lightweight (read-only), but serialized for simplicity.
 # =============================================================================
 
-set -euo pipefail
 
 echo "============================================================"
 echo "Phase 1: System Environment Static Information Collection"
