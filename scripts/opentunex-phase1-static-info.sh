@@ -1,4 +1,3 @@
-set -euo pipefail
 #!/bin/bash
 # =============================================================================
 # phase1-static-info.sh — Phase 1: System Environment Static Information

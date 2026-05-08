@@ -1,4 +1,3 @@
-set -euo pipefail
 #!/bin/bash
 # collect_sched_trace_metrics.sh - Collect and analyze scheduling trace metrics
 # Usage: collect_sched_trace_metrics.sh [PID] [DURATION]

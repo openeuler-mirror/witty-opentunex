@@ -1,4 +1,3 @@
-set -euo pipefail
 #!/bin/bash
 # collect_lock_trace.sh - Collect lock trace data for bottleneck analysis
 # Usage: collect_lock_trace.sh [duration] [PID]

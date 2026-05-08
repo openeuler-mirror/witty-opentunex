@@ -1,4 +1,3 @@
-set -euo pipefail
 #!/bin/bash
 # =============================================================================
 # phase3.1-hotspot-function.sh — Phase 3.1: Hotspot Function Analysis

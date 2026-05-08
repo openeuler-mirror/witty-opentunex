@@ -1,4 +1,3 @@
-set -euo pipefail
 #!/bin/bash
 # collect_io_metrics.sh - Collect I/O metrics for bottleneck analysis
 # Usage: collect_io_metrics.sh [duration in seconds] [PID]

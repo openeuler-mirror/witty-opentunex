@@ -1,4 +1,3 @@
-set -euo pipefail
 #!/bin/bash
 # collect_mem_metrics.sh - Collect memory metrics for bottleneck analysis
 # Usage: collect_mem_metrics.sh [PID]

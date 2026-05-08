@@ -1,4 +1,3 @@
-set -euo pipefail
 #!/bin/bash
 # =============================================================================
 # phase4-microarch.sh — Phase 4: Microarchitecture Bottleneck Analysis

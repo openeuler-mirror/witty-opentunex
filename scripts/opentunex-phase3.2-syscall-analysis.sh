@@ -1,4 +1,3 @@
-set -euo pipefail
 #!/bin/bash
 # =============================================================================
 # phase3.2-syscall-analysis.sh — Phase 3.2: Syscall Analysis

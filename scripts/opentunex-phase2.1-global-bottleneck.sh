@@ -1,4 +1,3 @@
-set -euo pipefail
 #!/bin/bash
 # =============================================================================
 # phase2.1-global-bottleneck.sh — Phase 2.1: Global Resource Bottleneck

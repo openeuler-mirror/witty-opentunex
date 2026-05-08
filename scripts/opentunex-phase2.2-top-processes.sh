@@ -1,4 +1,3 @@
-set -euo pipefail
 #!/bin/bash
 # =============================================================================
 # phase2.2-top-processes.sh — Phase 2.2: Top Resource Process Identification

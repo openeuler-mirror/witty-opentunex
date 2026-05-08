@@ -1,4 +1,3 @@
-set -euo pipefail
 #!/bin/bash
 # collect_net_metrics.sh - Collect network metrics for bottleneck analysis
 # Usage: collect_net_metrics.sh [duration in seconds]
