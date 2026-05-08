@@ -51,17 +51,22 @@ echo ""
 
 # Kernel lock statistics
 echo "=== Kernel Lock Statistics ==="
-cat /proc/lock_stat 2>/dev/null | head -50 || echo "lock_stat: not available (requires root)"
+LOCK_STAT=$(cat /proc/lock_stat 2>/dev/null)
+if [ -n "$LOCK_STAT" ]; then
+    echo "$LOCK_STAT" | head -50
+else
+    echo "lock_stat: not available (enable via: echo 1 > /proc/sys/kernel/lock_stat)"
+fi
 echo ""
 
 # File locks
 echo "=== File Locks ==="
-cat /proc/locks 2>/dev/null | head -30 || echo "locks: not available"
+cat /proc/locks 2>/dev/null | head -50 || echo "locks: not available"
 echo ""
 
 # Softirq activity
 echo "=== Softirq Activity ==="
-cat /proc/softirqs 2>/dev/null | head -20
+cat /proc/softirqs 2>/dev/null | head -50
 echo ""
 
 # Target process info
@@ -80,7 +85,7 @@ ps -eo state,wchan:32,pid,comm | awk '/^[DS]/ {print}' | sort | uniq -c | sort -
 echo ""
 
 echo "=== Wait Channel Breakdown ==="
-ps -eo state,wchan:32 | awk '/^[DS]$/ {print $2}' | sort | uniq -c | sort -rn | head -20
+ps -eo state,wchan:32 | awk '/^[DS]/ {print $2}' | sort | uniq -c | sort -rn | head -20
 echo ""
 
 echo "=== Collection Complete ==="
