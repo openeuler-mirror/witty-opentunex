@@ -1,8 +1,13 @@
 #!/bin/bash
 # collect_mem_metrics.sh - Collect memory metrics for bottleneck analysis
-# Usage: collect_mem_metrics.sh
+# Usage: collect_mem_metrics.sh [PID]
+
+TARGET_PID=${1:-}
 
 echo "=== Memory Metrics Collection ==="
+if [ -n "$TARGET_PID" ]; then
+    echo "Target PID: $TARGET_PID"
+fi
 echo ""
 
 # System overview
@@ -30,7 +35,12 @@ echo ""
 
 # VM OOM stats
 echo "=== VM OOM Stats ==="
-cat /proc/vmstat | grep -E 'oom|pgmajfault'
+oom_stats=$(cat /proc/vmstat | grep -E 'oom_kill|pgmajfault')
+if [ -n "$oom_stats" ]; then
+    echo "$oom_stats"
+else
+    echo "No OOM kills or major page faults recorded"
+fi
 echo ""
 
 # Swap configuration
@@ -40,7 +50,11 @@ echo ""
 
 # Slab info
 echo "=== Slab Info ==="
-cat /proc/slabinfo 2>/dev/null | head -30
+if [ -r /proc/slabinfo ]; then
+    head -30 /proc/slabinfo
+else
+    echo "/proc/slabinfo not readable (requires root)"
+fi
 echo ""
 
 # Vmalloc region
@@ -87,14 +101,19 @@ echo "=== NUMA Balancing ==="
 echo "numa_balancing: $(cat /proc/sys/kernel/numa_balancing 2>/dev/null || echo 'N/A')"
 echo ""
 
-# Memory cgroup limits (if in cgroup)
+# Memory cgroup limits (v1)
 echo "=== Memory CGroup Limits ==="
 if [ -f /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
-    echo "memory.limit_in_bytes: $(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo 'N/A')"
-    echo "memory.soft_limit_in_bytes: $(cat /sys/fs/cgroup/memory/memory.soft_limit_in_bytes 2>/dev/null || echo 'N/A')"
-    echo "memory.usage_in_bytes: $(cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null || echo 'N/A')"
+    echo "memory.limit_in_bytes: $(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null)"
+    echo "memory.soft_limit_in_bytes: $(cat /sys/fs/cgroup/memory/memory.soft_limit_in_bytes 2>/dev/null)"
+    echo "memory.usage_in_bytes: $(cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null)"
+elif [ -f /sys/fs/cgroup/memory.max ]; then
+    # cgroup v2
+    echo "memory.max: $(cat /sys/fs/cgroup/memory.max 2>/dev/null)"
+    echo "memory.current: $(cat /sys/fs/cgroup/memory.current 2>/dev/null)"
+    echo "memory.low: $(cat /sys/fs/cgroup/memory.low 2>/dev/null)"
 else
-    echo "Not in memory cgroup or limits not set"
+    echo "Memory cgroup limits not available"
 fi
 echo ""
 
@@ -111,20 +130,85 @@ echo ""
 
 # jemalloc configuration (if enabled)
 echo "=== jemalloc Configuration ==="
-if [ -n "$MALLOC_ARENA_MAX" ]; then
-    echo "MALLOC_ARENA_MAX: $MALLOC_ARENA_MAX"
+jemalloc_in_use=0
+
+# Check if target process actually links jemalloc
+if [ -n "$TARGET_PID" ] && [ -f /proc/$TARGET_PID/maps ]; then
+    jemap=$(grep -i jemalloc /proc/$TARGET_PID/maps 2>/dev/null | head -1)
+    if [ -n "$jemap" ]; then
+        echo "jemalloc detected in target process:"
+        echo "$jemap"
+        jemalloc_in_use=1
+    else
+        echo "Target process does NOT use jemalloc"
+    fi
+elif [ -n "$TARGET_PID" ]; then
+    echo "Target process /proc/$TARGET_PID/maps not available"
 else
-    echo "jemalloc using default arena settings"
+    echo "No target PID provided; skipping process mapping check"
 fi
-if [ -f /proc/self/maps ]; then
-    grep -i jemalloc /proc/self/maps 2>/dev/null | head -5 || echo "No jemalloc mappings found"
+
+# Show relevant jemalloc env vars regardless of whether in use
+echo ""
+echo "--- jemalloc Environment Variables ---"
+echo "MALLOC_ARENA_MAX: ${MALLOC_ARENA_MAX:-not set}"
+echo "MALLOC_CONF: ${MALLOC_CONF:-not set}"
+
+# Parse key MALLOC_CONF tunables
+if [ -n "$MALLOC_CONF" ]; then
+    echo ""
+    echo "--- MALLOC_CONF breakdown ---"
+    for key in background_thread dirty_decay_ms muzzy_decay_ms narenas percpu_arena \
+               oversize_threshold metadata_thp lg_extent_max_active_fit \
+               tcache lg_tcache_max prof prof_active stats_print; do
+        val=$(echo "$MALLOC_CONF" | grep -oP "${key}:\K[^,]+")
+        if [ -n "$val" ]; then
+            echo "  $key=$val"
+        fi
+    done
 fi
 echo ""
 
-# NUMA statistics
-echo "=== NUMA Statistics ==="
+# NUMA statistics (system-wide)
+echo "=== NUMA Statistics (system-wide) ==="
 cat /proc/vmstat | grep -E "numa_hit|numa_miss|numa_foreign|numa_local|numa_other" | head -20
 echo ""
+
+# NUMA statistics (per-process)
+if [ -n "$TARGET_PID" ] && [ -d "/proc/$TARGET_PID" ]; then
+    echo "=== Process NUMA Memory Distribution ==="
+    if command -v numastat &> /dev/null; then
+        numastat -p $TARGET_PID
+    elif [ -f /proc/$TARGET_PID/numa_maps ]; then
+        echo "(numastat not available)"
+    else
+        echo "numastat not available"
+    fi
+
+    # Dominant node vs CPU node check
+    if [ -f /proc/$TARGET_PID/numa_maps ]; then
+        dom=$(awk '{
+            for(i=1;i<=NF;i++) if($i ~ "^N[0-9]+=") {
+                split($i,a,"="); sum[a[1]]+=a[2]
+            }
+        } END {
+            for(n in sum) if(sum[n] > max) {max=sum[n]; dom=n}
+            print dom
+        }' /proc/$TARGET_PID/numa_maps)
+        cpu_node=$(awk '$1==pid {print $NF}' pid=$TARGET_PID /proc/$TARGET_PID/stat 2>/dev/null)
+        numa_of_cpu="unknown"
+        if [ -n "$cpu_node" ]; then
+            numa_of_cpu=$(lscpu -p=cpu,node 2>/dev/null | awk -F, -v cpu="$cpu_node" '$1==cpu {print $2}')
+        fi
+        dom_num=$(echo "$dom" | sed 's/^N//')
+        echo ""
+        echo "  Memory dominant node: ${dom_num:-?}  |  CPU node: ${numa_of_cpu:-?}  |  CPU: ${cpu_node:-?}"
+        if [ -n "$dom_num" ] && [ "$numa_of_cpu" != "unknown" ] && [ "$dom_num" != "$numa_of_cpu" ]; then
+            echo "  WARNING: memory on node $dom_num but process on node $numa_of_cpu (remote access)"
+        fi
+    fi
+    echo ""
+fi
 
 # NUMA node layout and distances
 echo "=== NUMA Node Layout ==="
@@ -150,5 +234,13 @@ echo ""
 
 # Recent OOM events
 echo "=== Recent OOM Events ==="
-dmesg -T 2>/dev/null | grep -iE 'out of memory|oom kill' | tail -10 || journalctl -k 2>/dev/null | grep -iE 'out of memory|oom kill' | tail -10
+oom_events=$(dmesg -T 2>/dev/null | grep -iE 'out of memory|oom kill' | tail -10)
+if [ -z "$oom_events" ] && command -v journalctl &> /dev/null; then
+    oom_events=$(journalctl -k 2>/dev/null | grep -iE 'out of memory|oom kill' | tail -10)
+fi
+if [ -n "$oom_events" ]; then
+    echo "$oom_events"
+else
+    echo "No recent OOM events found"
+fi
 echo ""
