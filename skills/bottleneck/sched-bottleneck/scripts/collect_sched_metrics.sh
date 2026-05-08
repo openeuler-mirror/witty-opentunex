@@ -27,7 +27,7 @@ echo "isolcpus: $(cat /proc/cmdline 2>/dev/null | grep -o 'isolcpus=[^ ]*' || ec
 echo "nohz_full: $(cat /proc/cmdline 2>/dev/null | grep -o 'nohz_full=[^ ]*' || echo 'N/A')"
 echo ""
 echo "=== Run Queue Status ==="
-vmstat 1 2 2 | tail -1 | awk '{print "running:", $1, "blocked:", $2}'
+vmstat 1 2 | tail -1 | awk '{print "running:", $1, "blocked:", $2}'
 echo ""
 
 if [ -n "$TARGET_PID" ]; then
