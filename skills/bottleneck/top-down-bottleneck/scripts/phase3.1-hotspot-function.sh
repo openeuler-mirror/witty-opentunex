@@ -2,29 +2,49 @@
 # =============================================================================
 # phase3.1-hotspot-function.sh — Phase 3.1: Hotspot Function Analysis
 # =============================================================================
-# Usage: bash phase3.1-hotspot-function.sh <PID>
+# Usage: bash phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]
 # Parameters:
-#   PID  — Target process ID (required)
+#   --pid      — Target process ID (required)
+#   --duration — Collection duration in seconds (optional, default: 15)
 # Requires: perf, root privilege. Total runtime: ~30-45 seconds (single 99Hz 15s record).
 # ⚠️ HEAVYWEIGHT: Do NOT run concurrently with strace or other perf commands
 #   on the same PID.
 # =============================================================================
 
+DURATION=15
+PID=""
 
-if [ -z "${1:-}" ]; then
-    echo "Usage: bash phase3.1-hotspot-function.sh <PID>" >&2
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --pid)
+            PID="$2"
+            shift 2
+            ;;
+        --duration)
+            DURATION="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Usage: bash phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]" >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [ -z "$PID" ]; then
+    echo "Error: --pid is required" >&2
+    echo "Usage: bash phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]" >&2
     exit 1
 fi
-
-PID="$1"
 
 echo "============================================================"
 echo "Phase 3.1: Hotspot Function Analysis (PID=$PID)"
 echo "============================================================"
 echo ""
 
-echo "--- perf record (99Hz, 15s sampling) ---"
-perf record -F 99 -p "$PID" -g -o /tmp/perf_phase3_1.data -- sleep 15
+echo "--- perf record (99Hz, ${DURATION}s sampling) ---"
+perf record -F 99 -p "$PID" -g -o /tmp/perf_phase3_1.data -- sleep "$DURATION"
 
 echo ""
 echo "--- perf report ---"

@@ -161,9 +161,9 @@ Phase 5: 基于证据的瓶颈分析
 | `scripts/phase1-static-info.sh` | 无 | 系统静态信息采集 | ~5s |
 | `scripts/phase2.1-global-bottleneck.sh` | 无 | 全局资源瓶颈识别 | ~30s |
 | `scripts/phase2.2-top-processes.sh` | 无 | 高资源消耗进程识别 | ~10s |
-| `scripts/phase3.1-hotspot-function.sh` | `<PID>` | perf热点函数分析 (⚠️重量级) | ~60-90s |
-| `scripts/phase3.2-syscall-analysis.sh` | `<PID>` | strace系统调用分析 (⚠️重量级) | 视进程活动 |
-| `scripts/phase4-microarch.sh` | `<PID>` | 微架构PMU分析 (⚠️重量级) | ~1.5-2min |
+| `scripts/phase3.1-hotspot-function.sh` | `--pid <PID> [--duration <SEC>]` | perf热点函数分析 (⚠️重量级) | ~30-45s |
+| `scripts/phase3.2-syscall-analysis.sh` | `--pid <PID> [--duration <SEC>]` | strace系统调用分析 (⚠️重量级) | 视duration |
+| `scripts/phase4-microarch.sh` | `--pid <PID> [--duration <SEC>]` | 微架构PMU分析 (⚠️重量级) | ~3-4min |
 
 ⚠️ 重量级脚本必须严格按顺序执行：phase3.1 → phase3.2 → phase4，不可并行。
 

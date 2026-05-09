@@ -87,7 +87,7 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 ### Step 3.1: Hotspot Function Analysis
 
-**Collection Command**: Run `scripts/phase3.1-hotspot-function.sh <PID>` to collect hotspot function data.
+**Collection Command**: Run `scripts/phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]` to collect hotspot function data.
 
 **Key Metrics to Analyze**:
 
@@ -104,7 +104,7 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 ### Step 3.2: Syscall Analysis
 
-**Collection Command**: Run `scripts/phase3.2-syscall-analysis.sh <PID>` to collect syscall data. Must run AFTER Phase 3.1 completes.
+**Collection Command**: Run `scripts/phase3.2-syscall-analysis.sh --pid <PID> [--duration <SECONDS>]` to collect syscall data. Must run AFTER Phase 3.1 completes.
 
 **Key Metrics to Analyze**:
 
@@ -121,7 +121,7 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 ## Phase 4: Microarchitecture Bottleneck Analysis
 
-**Collection Command**: Run `scripts/phase4-microarch.sh <PID>` to collect microarchitecture PMU data. Must run AFTER Phase 3 completes.
+**Collection Command**: Run `scripts/phase4-microarch.sh --pid <PID> [--duration <SECONDS>]` to collect microarchitecture PMU data. Must run AFTER Phase 3 completes.
 
 Use PMU (Performance Monitoring Unit) events to identify cache, branch, and pipeline bottlenecks:
 
