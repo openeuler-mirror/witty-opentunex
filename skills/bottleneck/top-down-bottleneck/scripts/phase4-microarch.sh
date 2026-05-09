@@ -26,26 +26,18 @@ echo "Phase 4: Microarchitecture Bottleneck Analysis (PID=$PID)"
 echo "============================================================"
 echo ""
 
-# ---- CPU Cache Analysis ----
-echo "========== CPU Cache Analysis =========="
+# ---- CPU Cache and TLB Analysis ----
+echo "========== CPU Cache and TLB Analysis =========="
 
-echo "--- Cache Miss Rates (15s) ---"
-perf stat -e L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses -p "$PID" -- sleep "$DUR"
+echo "--- Cache Miss Rates and TLB Miss Statistics (15s) ---"
+perf stat -e L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses,dTLB-loads,dTLB-load-misses,iTLB-loads,iTLB-load-misses -p "$PID" -- sleep "$DUR" || true
 
+# ---- Pipeline Stall and Branch Prediction Analysis ----
 echo ""
-echo "--- TLB Miss Statistics (15s, tolerate if unavailable) ---"
-perf stat -e dTLB-loads,dTLB-load-misses,iTLB-loads,iTLB-load-misses -p "$PID" -- sleep "$DUR" || true
+echo "========== Pipeline Stall and Branch Prediction Analysis =========="
 
-# ---- Branch Prediction and Pipeline Analysis ----
-echo ""
-echo "========== Branch Prediction and Pipeline Analysis =========="
-
-echo "--- Branch Misprediction Rate (15s, tolerate if unavailable) ---"
-perf stat -e branches,branch-misses -p "$PID" -- sleep "$DUR" || true
-
-echo ""
-echo "--- Pipeline Stall Analysis (15s) ---"
-perf stat -e stalled-cycles-frontend,stalled-cycles-backend,cycles,instructions -p "$PID" -- sleep "$DUR"
+echo "--- Pipeline Stall, Branch Prediction and Top-Down Analysis (15s) ---"
+perf stat -e stalled-cycles-frontend,stalled-cycles-backend,branches,branch-misses,cycles,instructions -p "$PID" -- sleep "$DUR"
 
 # ---- NUMA SCCL Analysis (ARM only) ----
 echo ""
@@ -54,13 +46,6 @@ echo "========== Cross-SCCL NUMA Analysis (ARM only) =========="
 echo "--- SCCL DRAM Access (15s, tolerate if unavailable) ---"
 perf stat -e remote_access,ll_cache_miss -p "$PID" -- sleep "$DUR" || echo "(remote_access/ll_cache_miss not available on this platform)"
 echo "Cross-SCCL ratio = remote_access / (remote_access + ll_cache_miss) * 100%"
-
-# ---- Top-Down Microarchitecture Analysis ----
-echo ""
-echo "========== Top-Down Microarchitecture Analysis =========="
-
-echo "--- Portable Pipeline Metrics (15s) ---"
-perf stat -e cycles,instructions -p "$PID" -- sleep "$DUR"
 
 
 echo "============================================================"
