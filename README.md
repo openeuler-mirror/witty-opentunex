@@ -51,9 +51,17 @@ opencode安装&使用参考文档：https://opencode.ai/docs/zh-cn/
 安装调优skills:
 ```sh
 mkdir -p ~/.config/opencode/skills/
-cp -r skills/* ~/.config/opencode/skills/
-# 或创建软链接
-# for skill in skills/*; do ln -s $(pwd)/${skill} ~/.config/opencode/skills/; done
+
+# 安装所有skills（跳过分类目录）
+for skill in skills/*/*/; do
+    cp -r "$skill" ~/.config/opencode/skills/
+done
+
+# 或按类别安装：
+# 瓶颈分析
+for s in skills/bottleneck/*/; do cp -r "$s" ~/.config/opencode/skills/; done
+# 优化及辅助
+for s in skills/optimization/*/ skills/auxiliary/*/; do cp -r "$s" ~/.config/opencode/skills/; done
 ```
 
 安装 opentunex-assistant agent：
@@ -80,7 +88,21 @@ opencode
 
 1、输入：`/skills` 选择 top-down-bottleneck 瓶颈分析或 os-performance-optimization 性能优化skill
 
-2、输入：帮我分析xx.xx.xx.xx机器上xx负载场景的性能瓶颈/帮我优化xx.xx.xx.xx机器上xx负载场景的性能
+2、输入：
+
+```
+## 角色目标
+你是一位 Linux 性能调优的专家。当前需要从操作系统层面对目标环境的性能瓶颈进行分析、给出优化建议，最终输出一份证据链充分的性能诊断报告。
+
+## 优化场景
+- 应用类型：【例如 Java Spring Boot / Go gRPC 服务 / Nginx + Python 推理】
+- 压测方式：【例如 wrk -t4 -c200 -d60s / Jmeter 并发 500】
+- 约束限制：【例如 不可调节应用层配置参数、benchmark参数】
+- 异常表现：【例如 p99 延迟从 50ms 剧增到 800ms，CPU 使用率仅 35%】
+
+## 分析模式
+- 自动：直接在调优目标环境中自动运行需要的采集命令，目标环境IP 【例如 XX.XX.XX.XX】
+```
 
 3、提前建立目标机器的 SSH 无密码连接，或根据对话提示，输入机器连接信息，将自动为目标调优机器建立 SSH 无密码连接，对话过程中同意需要的相关权限
 
@@ -96,12 +118,26 @@ opencode
 
 1、使用TAB键切换agent：选择 opentunex-assistant agent
 
-2、输入：帮我分析XX负载环境上的OS性能瓶颈/帮我优化XX负载环境上的性能
+2、输入：
 
-3、Agent加载需要的相关skill，输出下一步需执行的采集脚本
+```
+## 角色目标
+你是一位 Linux 性能调优的专家。当前需要从操作系统层面对目标环境的性能瓶颈进行分析、给出优化建议，最终输出一份证据链充分的性能诊断报告。
 
-4、脚本复制到客户环境执行（需保证benchmark负载执行中），执行结果通过飞书等软件传回本地机器
+## 优化场景
+- 应用类型：【例如 Java Spring Boot / Go gRPC 服务 / Nginx + Python 推理】
+- 压测方式：【例如 wrk -t4 -c200 -d60s / Jmeter 并发 500】
+- 约束限制：【例如 不可调节应用层配置参数、benchmark参数】
+- 异常表现：【例如 p99 延迟从 50ms 剧增到 800ms，CPU 使用率仅 35%】
 
-5、执行结果回复给opentunex-assistant agent
+## 分析模式
+- 手动：调优目标环境的初步采集数据已放置在目录 【例如 /tmp/tuning-redis-2026-xxxx】
+```
 
-6、等待opentunex-assistant agent进行自动化分析，给出瓶颈分析结果/优化建议，或继续迭代进行下一步采集。
+3、Agent加载需要的相关skill，自动化分析后，给出瓶颈分析结果/优化建议，或下一步需执行的采集脚本
+
+4、脚本复制到客户环境执行(需保证benchmark负载执行中)，结果传回本地机器的路径
+
+5、输入：采集脚本结果已存放在 xxx.txt 文件
+
+6、等待opentunex-assistant agent进行迭代分析，给出瓶颈分析结果/优化建议，或下一步采集计划。
