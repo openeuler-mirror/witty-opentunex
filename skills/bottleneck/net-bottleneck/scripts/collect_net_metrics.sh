@@ -72,22 +72,33 @@ for iface in $(ip -br link show | awk '$2=="UP" {print $1}' | grep -v lo | head 
     echo ""
 done
 
-# sar for network stats
+# sar and latency tests in parallel
 ACTIVE_IFACES=$(ip -br link show | awk '$2=="UP" && $1!="lo" {print $1}' | paste -sd,)
 sar -n DEV $INTERVAL $DURATION --iface=$ACTIVE_IFACES > /tmp/sar_dev_out.txt 2>&1 &
 SAR_DEV_PID=$!
-
 sar -n EDEV $INTERVAL $DURATION --iface=$ACTIVE_IFACES > /tmp/sar_edeve_out.txt 2>&1 &
 SAR_EDEV_PID=$!
 
-# Wait for collection
-wait $SAR_DEV_PID $SAR_EDEV_PID 2>/dev/null
+GATEWAY=$(ip route | grep default | awk '{print $3}' | head -1)
+ping -c 5 $GATEWAY 2>/dev/null > /tmp/ping_gw_out.txt &
+PING_GW_PID=$!
+ping -c 5 127.0.0.1 2>/dev/null > /tmp/ping_lo_out.txt &
+PING_LO_PID=$!
+
+wait $SAR_DEV_PID $SAR_EDEV_PID $PING_GW_PID $PING_LO_PID 2>/dev/null
 
 echo "--- Network Device Stats (sar -n DEV) ---"
 tail -n +4 /tmp/sar_dev_out.txt
 echo ""
 echo "--- Network Error Stats (sar -n EDEV) ---"
 tail -n +4 /tmp/sar_edeve_out.txt
+echo ""
+echo "--- Latency Test (to gateway) ---"
+echo "Default gateway: $GATEWAY"
+[ -s /tmp/ping_gw_out.txt ] && tail -2 /tmp/ping_gw_out.txt || echo "No gateway found"
+echo ""
+echo "--- Loopback Latency Test ---"
+tail -2 /tmp/ping_lo_out.txt
 echo ""
 
 echo "--- TCP Statistics ---"
@@ -104,22 +115,6 @@ echo ""
 
 echo "--- TCP Connection States ---"
 ss -tan 2>/dev/null | awk '{print $1}' | sort | uniq -c | sort -rn | head -10
-echo ""
-
-# Latency test
-echo "--- Latency Test (to gateway) ---"
-GATEWAY=$(ip route | grep default | awk '{print $3}' | head -1)
-echo "Default gateway: $GATEWAY"
-echo ""
-if [ -n "$GATEWAY" ]; then
-    ping -c 5 $GATEWAY 2>/dev/null | tail -2
-else
-    echo "No gateway found"
-fi
-echo ""
-
-echo "--- Loopback Latency Test ---"
-ping -c 5 127.0.0.1 2>/dev/null | tail -2
 echo ""
 
 echo "=== Collection Complete ==="
