@@ -35,10 +35,17 @@ echo "--- perf record for flamegraph (59Hz, 15s) ---"
 perf record -F 59 -p "$PID" -g -o /tmp/perf_phase3_1_fg.data -- sleep 15
 echo ""
 echo "--- Generating flamegraph ---"
-(which stackcollapse-perf.pl 2>/dev/null && which flamegraph.pl 2>/dev/null ) && \
-perf script -i /tmp/perf_phase3_1_fg.data | stackcollapse-perf.pl 2>/dev/null | flamegraph.pl > /tmp/flamegraph_phase3_1.svg 2>/dev/null \
-    && echo "Flamegraph saved to /tmp/flamegraph_phase3_1.svg" \
-    || echo "Flamegraph generation skipped (stackcollapse-perf.pl / flamegraph.pl not installed)"
+if command -v stackcollapse-perf.pl >/dev/null 2>&1 && command -v flamegraph.pl >/dev/null 2>&1; then
+    perf script -i /tmp/perf_phase3_1_fg.data | stackcollapse-perf.pl 2>/dev/null | flamegraph.pl > /tmp/flamegraph_phase3_1.svg 2>/dev/null \
+        && echo "Flamegraph saved to /tmp/flamegraph_phase3_1.svg" \
+        || echo "Flamegraph generation failed"
+else
+    echo "Flamegraph generation skipped (stackcollapse-perf.pl / flamegraph.pl not installed)"
+    echo "To install:"
+    echo "  curl -k -o /usr/local/bin/stackcollapse-perf.pl https://raw.githubusercontent.com/brendangregg/FlameGraph/master/stackcollapse-perf.pl"
+    echo "  curl -k -o /usr/local/bin/flamegraph.pl https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl"
+    echo "  chmod +x /usr/local/bin/stackcollapse-perf.pl /usr/local/bin/flamegraph.pl"
+fi
 
 echo ""
 echo "============================================================"

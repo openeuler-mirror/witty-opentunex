@@ -117,8 +117,12 @@ cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true
 echo ""
 echo "--- I/O Scheduler per Block Device ---"
 for dev in $(ls /sys/block/); do
-    echo "$dev: $(cat /sys/block/$dev/queue/scheduler 2>/dev/null)"
-done || true
+    if [ -f /sys/block/$dev/queue/scheduler ]; then
+        echo "$dev: $(cat /sys/block/$dev/queue/scheduler 2>/dev/null)"
+    else
+        echo "$dev: (no scheduler file, e.g. dm device)"
+    fi
+done
 
 echo ""
 echo "--- Default IRQ Affinity ---"

@@ -77,9 +77,9 @@ if [ -n "$TARGET_PID" ] && [ -d "/proc/$TARGET_PID" ]; then
 
     # Open files limit
     echo "--- Open Files Limit ---"
-    hard=$(awk '/Max open files/ {print $4}' /proc/$TARGET_PID/limits)
-    soft=$(awk '/Max open files/ {print $5}' /proc/$TARGET_PID/limits 2>/dev/null)  # fallback to hard
-    echo "  soft=${soft:-$hard}  hard=$hard"
+    soft=$(awk '/Max open files/ {print $4}' /proc/$TARGET_PID/limits)
+    hard=$(awk '/Max open files/ {print $5}' /proc/$TARGET_PID/limits)
+    echo "  soft=$soft  hard=$hard"
 
     # Open files count
     fd_count=$(ls /proc/$TARGET_PID/fd/ 2>/dev/null | wc -l)

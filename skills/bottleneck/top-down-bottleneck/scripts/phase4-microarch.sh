@@ -52,7 +52,7 @@ echo ""
 echo "========== Cross-SCCL NUMA Analysis (ARM only) =========="
 
 echo "--- SCCL DRAM Access (15s, tolerate if unavailable) ---"
-perf stat -e remote_access,ll_cache_miss -p "$PID" -- sleep "$DUR" 2>/dev/null || echo "(remote_access/ll_cache_miss not available on this platform)"
+perf stat -e remote_access,ll_cache_miss -p "$PID" -- sleep "$DUR" || echo "(remote_access/ll_cache_miss not available on this platform)"
 echo "Cross-SCCL ratio = remote_access / (remote_access + ll_cache_miss) * 100%"
 
 # ---- Top-Down Microarchitecture Analysis ----

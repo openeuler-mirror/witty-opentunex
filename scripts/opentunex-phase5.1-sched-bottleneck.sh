@@ -15,10 +15,46 @@ echo "sched_schedstats: $(cat /proc/sys/kernel/sched_schedstats 2>/dev/null || e
 echo ""
 
 echo "=== Scheduler Configuration ==="
-echo "sched_latency_ns: $(cat /proc/sys/kernel/sched_latency_ns 2>/dev/null || echo 'N/A')"
-echo "sched_min_granularity_ns: $(cat /proc/sys/kernel/sched_min_granularity_ns 2>/dev/null || echo 'N/A')"
-echo "sched_wakeup_granularity_ns: $(cat /proc/sys/kernel/sched_wakeup_granularity_ns 2>/dev/null || echo 'N/A')"
-echo "sched_tunable_scaling: $(cat /proc/sys/kernel/sched_tunable_scaling 2>/dev/null || echo 'N/A')"
+
+# sched_latency_ns / base_slice_ns: /proc/sys (4.x/5.x), debugfs (6.x)
+sched_latency="N/A"
+if [ -f /proc/sys/kernel/sched_latency_ns ]; then
+    sched_latency=$(cat /proc/sys/kernel/sched_latency_ns)
+elif [ -f /sys/kernel/debug/sched/base_slice_ns ]; then
+    sched_latency=$(cat /sys/kernel/debug/sched/base_slice_ns)
+fi
+echo "sched_latency_ns (base_slice_ns): $sched_latency"
+
+# sched_min_granularity_ns: /proc/sys (4.x/5.x), implicit on 6.x
+if [ -f /proc/sys/kernel/sched_min_granularity_ns ]; then
+    echo "sched_min_granularity_ns: $(cat /proc/sys/kernel/sched_min_granularity_ns)"
+else
+    echo "sched_min_granularity_ns: N/A (implicit on 6.x, ~0.75 * base_slice_ns)"
+fi
+
+# sched_wakeup_granularity_ns: /proc/sys (4.x/5.x), implicit on 6.x
+if [ -f /proc/sys/kernel/sched_wakeup_granularity_ns ]; then
+    echo "sched_wakeup_granularity_ns: $(cat /proc/sys/kernel/sched_wakeup_granularity_ns)"
+else
+    echo "sched_wakeup_granularity_ns: N/A (implicit on 6.x, ~1.0 * base_slice_ns)"
+fi
+
+# sched_tunable_scaling: /proc/sys (4.x/5.x), debugfs (6.x)
+if [ -f /proc/sys/kernel/sched_tunable_scaling ]; then
+    echo "sched_tunable_scaling: $(cat /proc/sys/kernel/sched_tunable_scaling)"
+elif [ -f /sys/kernel/debug/sched/tunable_scaling ]; then
+    echo "sched_tunable_scaling: $(cat /sys/kernel/debug/sched/tunable_scaling)"
+else
+    echo "sched_tunable_scaling: N/A"
+fi
+
+# sched_migration_cost_ns: /proc/sys (4.x/5.x), debugfs (6.x)
+if [ -f /proc/sys/kernel/sched_migration_cost_ns ]; then
+    echo "sched_migration_cost_ns: $(cat /proc/sys/kernel/sched_migration_cost_ns)"
+elif [ -f /sys/kernel/debug/sched/migration_cost_ns ]; then
+    echo "sched_migration_cost_ns: $(cat /sys/kernel/debug/sched/migration_cost_ns)"
+fi
+
 echo "sched_autogroup_enabled: $(cat /proc/sys/kernel/sched_autogroup_enabled 2>/dev/null || echo 'N/A')"
 echo "sched_child_runs_first: $(cat /proc/sys/kernel/sched_child_runs_first 2>/dev/null || echo 'N/A')"
 echo "sched_rt_period_us: $(cat /proc/sys/kernel/sched_rt_period_us 2>/dev/null || echo 'N/A')"
