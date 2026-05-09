@@ -19,7 +19,7 @@ This skill performs scheduling trace analysis using perf tools.
 
 ## Phase 1: Data Collection
 
-**Collection Command**: Run `scripts/collect_sched_metrics.sh [PID] [DURATION]` to collect and analyze scheduling trace data (default 5 seconds, PID optional).
+**Collection Command**: Run `scripts/collect_sched_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect and analyze scheduling trace data (default 5 seconds, PID optional).
 
 ---
 

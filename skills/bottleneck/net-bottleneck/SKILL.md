@@ -19,7 +19,7 @@ This skill performs OS-level network performance bottleneck analysis.
 
 ## Phase 1: Data Collection
 
-**Collection Command**: Run `scripts/collect_net_metrics.sh` to collect network metrics (15 seconds).
+**Collection Command**: Run `scripts/collect_net_metrics.sh [--duration <SECONDS>]` to collect network metrics (default 10 seconds).
 
 **Output**:
 - System overview

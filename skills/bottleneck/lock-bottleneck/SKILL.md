@@ -25,7 +25,7 @@ This skill performs OS-level lock performance bottleneck analysis.
 
 ## Phase 1: Data Collection
 
-**Collection Command**: Run `scripts/collect_lock_trace.sh [duration] [PID]` to collect lock metrics (default 15 seconds).
+**Collection Command**: Run `scripts/collect_lock_trace.sh --pid [PID] [--duration <SECONDS>]` to collect lock metrics (default 15 seconds).
 
 **Output**:
 - System lock configuration (lock_stat, sched_schedstats, futex settings)

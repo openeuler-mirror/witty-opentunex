@@ -19,7 +19,7 @@ This skill performs OS-level memory performance bottleneck analysis, including m
 
 ## Phase 1: Data Collection
 
-**Collection Command**: Run `scripts/collect_mem_metrics.sh` to collect memory metrics.
+**Collection Command**: Run `scripts/collect_mem_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect memory metrics.
 
 ---
 

@@ -6,7 +6,6 @@
 # No parameters required. iotop requires root.
 # =============================================================================
 
-set -euo pipefail
 
 echo "============================================================"
 echo "Phase 2.2: Top Resource Process Identification"

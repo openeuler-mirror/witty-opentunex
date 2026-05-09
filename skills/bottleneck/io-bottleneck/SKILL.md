@@ -19,7 +19,7 @@ This skill performs OS-level I/O performance bottleneck analysis.
 
 ## Phase 1: Data Collection
 
-**Collection Command**: Run `scripts/collect_io_metrics.sh` to collect I/O metrics (15 seconds).
+**Collection Command**: Run `scripts/collect_io_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect I/O metrics (default 15 seconds).
 
 **Output**:
 - System overview (CPU, memory, disk devices)
