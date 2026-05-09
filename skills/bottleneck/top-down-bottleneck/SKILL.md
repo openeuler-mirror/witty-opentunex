@@ -1,6 +1,6 @@
 ---
 name: top-down-bottleneck
-description: Top-down OS-level bottleneck analysis, includes comprehensive system collection(read from user-given data collection files first), and three-level bottleneck analysis (global, process, microarchitecture). Use when diagnosing OS-level performance issues, identifying high-pressure processes, mapping resource dependencies, or analyzing OS-level resource bottlenecks. This skill does NOT analyze application-layer data (e.g., MySQL query plans, Java heap, Redis commands). Supports iterative refinement until sufficient analysis is achieved.
+description: Top-down OS-level bottleneck analysis, includes comprehensive system collection(read from user-given data collection files first), and three-level bottleneck analysis (global, process, microarchitecture). This skill should be triggered FIRST for any performance optimization tasks, serving as the prerequisite for specialized bottleneck skills (sched-bottleneck, lock-bottleneck, io-bottleneck, mem-bottleneck, net-bottleneck). Use when diagnosing OS-level performance issues, identifying high-pressure processes, mapping resource dependencies, or analyzing OS-level resource bottlenecks. This skill does NOT analyze application-layer data (e.g., MySQL query plans, Java heap, Redis commands). Supports iterative refinement until sufficient analysis is achieved.
 ---
 
 # top-down-bottleneck — Top-Down System Bottleneck Analysis
@@ -11,6 +11,9 @@ This skill performs a five-phase analysis:
 (3) hotspot function and syscall analysis for top processes;
 (4) microarchitecture bottleneck analysis using PMU events;
 (5) evidence-based bottleneck analysis with severity mapping.
+
+**IMPORTANT**: This skill must be triggered FIRST for performance optimization. Phase 5 specialized skills (sched-bottleneck, lock-bottleneck, io-bottleneck, mem-bottleneck, net-bottleneck) should only be invoked based on top-down findings, not independently.
+
 The skill focuses exclusively on OS-level resource bottlenecks. It does NOT collect, analyze, or provide recommendations for application-layer data (database queries, JVM heap, application logs, etc.).
 The skill supports iterative refinement until sufficient analysis is achieved.
 First try to read from user-given data collection files, if data is not enough, provides script to user to conduct supplementary collection.
@@ -148,25 +151,25 @@ Use PMU (Performance Monitoring Unit) events to identify cache, branch, and pipe
 
 ## Phase 5: Deep-Dive Analysis via Specialized Skills
 
-Based on the bottleneck categories identified in Phase 5, invoke the corresponding specialized skills for deep-dive analysis.
+**Prerequisite**: Phase 5 specialized skills MUST only be invoked AFTER top-down analysis (Phase 1-4) identifies specific bottleneck types. Do NOT invoke specialized skills independently without top-down findings.
 
 ### Step 5.1: Determine Specialized Skill Mapping
 
-Map identified bottleneck types to specialized skills:
+Map identified bottleneck types to specialized skills (invoked in order based on findings):
 
-| Identified Bottleneck Type | Specialized Skill to Invoke |
-|---------------------------|----------------------------|
-| Disk I/O saturation (%util > 90%, await > 20ms) | **io-bottleneck** |
-| CPU iowait elevated (%iowait > 20%) | **io-bottleneck** |
-| Memory pressure (SwapUsed > 50%, majflt/s > 1000) | **mem-bottleneck** |
-| NUMA imbalance (remote/local > 2:1) | **mem-bottleneck** |
-| Memory fragmentation (Slab > 30%) | **mem-bottleneck** |
-| Network retransmission (Retrans > 2%) | **net-bottleneck** |
-| Connection exhaustion (TIME_WAIT > 5000) | **net-bottleneck** |
-| High context switches with futex wait | **lock-bottleneck** |
-| Processes in D/S state with lock wchan | **lock-bottleneck** |
-| Scheduling latency outliers (max delay > 100ms) | **sched-bottleneck** |
-| CPU contention (preemption > threshold) | **sched-bottleneck** |
+| Identified Bottleneck Type | Severity | Specialized Skill to Invoke |
+|---------------------------|----------|----------------------------|
+| Scheduling latency outliers (max delay > 100ms) | High/Critical | **sched-bottleneck** (phase5.1) |
+| CPU contention (preemption > threshold) | High/Critical | **sched-bottleneck** (phase5.1) |
+| High context switches with futex wait | High/Critical | **lock-bottleneck** (phase5.2) |
+| Processes in D/S state with lock wchan | High/Critical | **lock-bottleneck** (phase5.2) |
+| Disk I/O saturation (%util > 90%, await > 20ms) | High/Critical | **io-bottleneck** (phase5.3) |
+| CPU iowait elevated (%iowait > 20%) | High/Critical | **io-bottleneck** (phase5.3) |
+| Memory pressure (SwapUsed > 50%, majflt/s > 1000) | High/Critical | **mem-bottleneck** (phase5.4) |
+| NUMA imbalance (remote/local > 2:1) | High/Critical | **mem-bottleneck** (phase5.4) |
+| Memory fragmentation (Slab > 30%) | Medium/High | **mem-bottleneck** (phase5.4) |
+| Network retransmission (Retrans > 2%) | High/Critical | **net-bottleneck** (phase5.5) |
+| Connection exhaustion (TIME_WAIT > 5000) | Medium/High | **net-bottleneck** (phase5.5) |
 
 ### Step 5.2: Invoke Specialized Skills
 
