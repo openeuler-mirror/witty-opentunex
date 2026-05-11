@@ -1,5 +1,5 @@
 ---
-name: top-down-bottleneck
+name: opentunex-top-down-bottleneck
 description: Top-down OS-level bottleneck analysis, includes comprehensive system collection(read from user-given data collection files first), and three-level bottleneck analysis (global, process, microarchitecture). This skill should be triggered FIRST for any performance optimization tasks, serving as the prerequisite for specialized bottleneck skills (sched-bottleneck, lock-bottleneck, io-bottleneck, mem-bottleneck, net-bottleneck). Use when diagnosing OS-level performance issues, identifying high-pressure processes, mapping resource dependencies, or analyzing OS-level resource bottlenecks. This skill does NOT analyze application-layer data (e.g., MySQL query plans, Java heap, Redis commands).
 ---
 

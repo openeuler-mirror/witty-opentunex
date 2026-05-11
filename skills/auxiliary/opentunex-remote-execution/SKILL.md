@@ -1,5 +1,5 @@
 ---
-name: remote-execution
+name: opentunex-remote-execution
 description: Remote execution framework for client-server analysis. Provides standardized SSH connection management, command execution patterns, and timeout handling for all skills that need to run commands on remote clients.
 ---
 

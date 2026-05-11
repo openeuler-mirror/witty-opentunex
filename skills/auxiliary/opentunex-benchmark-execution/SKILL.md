@@ -1,5 +1,5 @@
 ---
-name: benchmark-execution
+name: opentunex-benchmark-execution
 description: Application performance benchmark execution framework. Provides benchmark control, configuration, monitoring, and result storage for MySQL, Redis, PostgreSQL, Nginx, Java, and Go applications. Use with references/<app>.md for detailed tool usage.
 ---
 

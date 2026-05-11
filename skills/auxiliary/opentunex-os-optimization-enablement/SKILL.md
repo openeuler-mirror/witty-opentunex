@@ -1,5 +1,5 @@
 ---
-name: os-optimization-enablement
+name: opentunex-os-optimization-enablement
 description: OS-level optimization enablement verification skill. Provides configuration backup, performance baseline testing, optimization execution (batch/step-by-step), comprehensive benchmark testing, and rollback support. This skill is invoked after os-performance-optimization identifies bottlenecks and recommendations are approved.
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: inference-core-binding-optimization
+name: opentunex-inference-core-binding-optimization
 description: Use this skill to optimize inference workloads for latency and throughput by performing process/thread-level affinity and NUMA placement tuning on the host system. This skill is focused on optimizing host-side deployments of key inference processes/threads via CPU core binding and memory affinity, enhancing host-side performance.
 ---
 

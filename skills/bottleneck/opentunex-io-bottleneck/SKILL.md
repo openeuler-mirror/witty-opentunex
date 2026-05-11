@@ -1,5 +1,5 @@
 ---
-name: io-bottleneck
+name: opentunex-io-bottleneck
 description: OS-level I/O bottleneck analysis. Analyzes disk utilization, I/O wait, queue depth, and memory pressure to identify OS-level I/O bottlenecks. Use when diagnosing disk I/O performance issues.
 ---
 

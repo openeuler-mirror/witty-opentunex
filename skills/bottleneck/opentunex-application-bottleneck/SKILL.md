@@ -1,5 +1,5 @@
 ---
-name: application-bottleneck
+name: opentunex-application-bottleneck
 description: Application-specific workload data collection and bottleneck analysis. Provides deep-dive analysis for MySQL, Redis, PostgreSQL, Kafka, Nginx, MongoDB, Java, and Go applications. Use after system-level bottleneck analysis (Phase 2) when root cause is unclear or application-level optimization is required.
 ---
 

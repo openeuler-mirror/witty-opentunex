@@ -1,5 +1,5 @@
 ---
-name: mem-bottleneck
+name: opentunex-mem-bottleneck
 description: OS-level Memory bottleneck analysis. Analyzes memory utilization, swap activity, page faults, memory bandwidth, NUMA/Cluster access patterns to identify OS-level Memory bottlenecks including memory-access-intensive scenarios.
 ---
 
