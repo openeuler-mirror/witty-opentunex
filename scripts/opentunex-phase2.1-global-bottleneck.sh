@@ -1,1 +1,1 @@
-../skills/bottleneck/top-down-bottleneck/scripts/phase2.1-global-bottleneck.sh
+../skills/bottleneck/opentunex-top-down-bottleneck/scripts/phase2.1-global-bottleneck.sh

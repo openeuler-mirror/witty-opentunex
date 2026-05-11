@@ -1,1 +1,1 @@
-../skills/bottleneck/io-bottleneck/scripts/collect_io_metrics.sh
+../skills/bottleneck/opentunex-io-bottleneck/scripts/collect_io_metrics.sh

@@ -1,1 +1,1 @@
-../skills/bottleneck/mem-bottleneck/scripts/collect_mem_metrics.sh
+../skills/bottleneck/opentunex-mem-bottleneck/scripts/collect_mem_metrics.sh

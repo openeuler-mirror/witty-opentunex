@@ -1,1 +1,1 @@
-../skills/bottleneck/top-down-bottleneck/scripts/phase3.2-syscall-analysis.sh
+../skills/bottleneck/opentunex-top-down-bottleneck/scripts/phase3.2-syscall-analysis.sh
