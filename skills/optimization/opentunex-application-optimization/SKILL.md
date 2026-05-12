@@ -1,5 +1,5 @@
 ---
-name: application-optimization
+name: opentunex-application-optimization
 description: Application-specific performance optimization for MySQL, Redis, PostgreSQL, Kafka, Nginx, MongoDB, Java, and Go applications. Uses application-bottleneck analysis to identify app-level bottlenecks, optimize configurations, and validate improvements. Use after os-performance-optimization or when application-level tuning is required.
 ---
 

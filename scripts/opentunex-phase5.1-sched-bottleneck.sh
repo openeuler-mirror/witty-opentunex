@@ -1,1 +1,1 @@
-../skills/bottleneck/sched-bottleneck/scripts/collect_sched_metrics.sh
+../skills/bottleneck/opentunex-sched-bottleneck/scripts/collect_sched_metrics.sh

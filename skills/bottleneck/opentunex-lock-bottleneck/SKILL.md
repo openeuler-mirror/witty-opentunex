@@ -1,5 +1,5 @@
 ---
-name: lock-bottleneck
+name: opentunex-lock-bottleneck
 description: OS-level lock performance bottleneck analysis. Analyzes lock contention, futex wait patterns, spinlock contention, and blocking behavior to identify if target business process suffers from OS lock bottlenecks.
 ---
 

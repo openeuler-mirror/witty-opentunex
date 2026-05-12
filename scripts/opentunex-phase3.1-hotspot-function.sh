@@ -1,1 +1,1 @@
-../skills/bottleneck/top-down-bottleneck/scripts/phase3.1-hotspot-function.sh
+../skills/bottleneck/opentunex-top-down-bottleneck/scripts/phase3.1-hotspot-function.sh

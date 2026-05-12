@@ -1,1 +1,1 @@
-../skills/bottleneck/net-bottleneck/scripts/collect_net_metrics.sh
+../skills/bottleneck/opentunex-net-bottleneck/scripts/collect_net_metrics.sh

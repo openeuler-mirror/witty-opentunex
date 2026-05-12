@@ -1,5 +1,5 @@
 ---
-name: net-bottleneck
+name: opentunex-net-bottleneck
 description: OS-level Network bottleneck analysis. Analyzes network subsystem performance including bandwidth, latency, packet loss, connection states, and protocol stack efficiency to identify OS-level network bottlenecks.
 ---
 

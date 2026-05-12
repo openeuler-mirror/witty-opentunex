@@ -1,1 +1,1 @@
-../skills/bottleneck/top-down-bottleneck/scripts/phase1-static-info.sh
+../skills/bottleneck/opentunex-top-down-bottleneck/scripts/phase1-static-info.sh

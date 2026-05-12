@@ -1,5 +1,5 @@
 ---
-name: sched-bottleneck
+name: opentunex-sched-bottleneck
 description: OS-level scheduling bottleneck analysis. Analyzes scheduling latency, preemption patterns, wakeup latency, and run queue contention using perf sched tools.
 ---
 

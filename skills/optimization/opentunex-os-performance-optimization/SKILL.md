@@ -1,5 +1,5 @@
 ---
-name: os-performance-optimization
+name: opentunex-os-performance-optimization
 description: OS-level performance optimization analysis for Linux kernel, lib libraries, generic services, and process affinity tuning. Uses top-down-bottleneck analysis to identify OS-level bottlenecks and propose optimization strategies. This skill only performs bottleneck analysis and recommendation - use os-optimization-enablement skill to actually apply optimizations. Does NOT optimize application-layer components - use application-optimization skill for that.
 ---
 
