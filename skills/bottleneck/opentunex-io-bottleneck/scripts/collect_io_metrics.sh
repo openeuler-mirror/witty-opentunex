@@ -2,13 +2,30 @@
 # collect_io_metrics.sh - Collect I/O metrics for bottleneck analysis
 # Usage: collect_io_metrics.sh [duration in seconds] [PID]
 
-DURATION=${1:-15}
-TARGET_PID=${2:-}
+DURATION=15
+TARGET_PID=""
 INTERVAL=1
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --pid)
+            TARGET_PID="$2"
+            shift 2
+            ;;
+        --duration)
+            DURATION="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Usage: bash $0 [--pid <PID>] [--duration <SECONDS>]" >&2
+            exit 1
+            ;;
+    esac
+done
 
 echo "=== I/O Metrics Collection ==="
 echo "Duration: $DURATION seconds"
-echo "Interval: $INTERVAL second"
 if [ -n "$TARGET_PID" ]; then
     echo "Target PID: $TARGET_PID"
 fi

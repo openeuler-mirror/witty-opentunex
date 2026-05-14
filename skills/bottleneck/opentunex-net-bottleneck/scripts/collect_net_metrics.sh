@@ -2,12 +2,25 @@
 # collect_net_metrics.sh - Collect network metrics for bottleneck analysis
 # Usage: collect_net_metrics.sh [duration in seconds]
 
-DURATION=${1:-10}
+DURATION=10
 INTERVAL=1
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --duration)
+            DURATION="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Usage: bash $0 [--duration <SECONDS>]" >&2
+            exit 1
+            ;;
+    esac
+done
 
 echo "=== Network Metrics Collection ==="
 echo "Duration: $DURATION seconds"
-echo "Interval: $INTERVAL second"
 echo ""
 
 # Network interfaces
