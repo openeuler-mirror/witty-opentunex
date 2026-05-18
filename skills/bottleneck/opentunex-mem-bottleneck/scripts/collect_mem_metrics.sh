@@ -2,7 +2,21 @@
 # collect_mem_metrics.sh - Collect memory metrics for bottleneck analysis
 # Usage: collect_mem_metrics.sh [PID]
 
-TARGET_PID=${1:-}
+TARGET_PID=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --pid)
+            TARGET_PID="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Usage: bash $0 [--pid <PID>]" >&2
+            exit 1
+            ;;
+    esac
+done
 
 echo "=== Memory Metrics Collection ==="
 if [ -n "$TARGET_PID" ]; then

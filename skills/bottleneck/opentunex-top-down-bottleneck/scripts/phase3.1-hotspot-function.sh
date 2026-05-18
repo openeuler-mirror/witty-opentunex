@@ -26,7 +26,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: bash phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]" >&2
+            echo "Usage: bash $0 --pid <PID> [--duration <SECONDS>]" >&2
             exit 1
             ;;
     esac
@@ -34,7 +34,7 @@ done
 
 if [ -z "$PID" ]; then
     echo "Error: --pid is required" >&2
-    echo "Usage: bash phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]" >&2
+    echo "Usage: bash $0 --pid <PID> [--duration <SECONDS>]" >&2
     exit 1
 fi
 
