@@ -51,12 +51,12 @@ collect_hotspot_function() {
 
     echo ""
     echo "--- perf report ---"
-    perf report -i /tmp/perf_phase3_1.data --stdio --percent-limit 1
+    PAGER=cat perf report -i /tmp/perf_phase3_1.data --stdio --percent-limit 1
 
     echo ""
     echo "--- Generating flamegraph ---"
     if command -v stackcollapse-perf.pl >/dev/null 2>&1 && command -v flamegraph.pl >/dev/null 2>&1; then
-        perf script -i /tmp/perf_phase3_1.data | stackcollapse-perf.pl 2>/dev/null | flamegraph.pl > /tmp/flamegraph_phase3_1.svg 2>/dev/null \
+        PAGER=cat perf script -i /tmp/perf_phase3_1.data | stackcollapse-perf.pl 2>/dev/null | flamegraph.pl > /tmp/flamegraph_phase3_1.svg 2>/dev/null \
             && echo "Flamegraph saved to /tmp/flamegraph_phase3_1.svg" \
             || echo "Flamegraph generation failed"
     else
@@ -67,10 +67,10 @@ collect_hotspot_function() {
         echo "  chmod +x /usr/local/bin/stackcollapse-perf.pl /usr/local/bin/flamegraph.pl"
     fi
 
+    rm -f /tmp/perf_phase3_1.data 2>/dev/null
     echo ""
     echo "============================================================"
     echo "Phase 3.1: Hotspot Function Analysis Complete (PID=$PID)"
-    echo "Data file: /tmp/perf_phase3_1.data"
     echo "============================================================"
 }
 

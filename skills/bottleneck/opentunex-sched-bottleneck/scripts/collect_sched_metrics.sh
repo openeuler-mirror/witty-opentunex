@@ -144,6 +144,7 @@ collect_sched_metrics() {
         cat $SCHED_TIMEHIST_TARGET | awk 'NR>3 && NF>=6 {wait+=$4; delay+=$5; if($4>max_w) max_w=$4; if($5>max_d) max_d=$5; n++} END {if(n>0) printf "Avg wait: %.3f ms, sch_delay: %.3f ms, Max wait: %.3f ms, Max delay: %.3f ms (samples: %d)\n", wait/n, delay/n, max_w, max_d, n}'
         echo ""
     fi
+    rm -f perf.data 2>/dev/null
 
     echo "=== Collection Complete ==="
 }
