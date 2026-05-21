@@ -25,7 +25,7 @@ collect_static_info() {
 
     echo ""
     echo "--- Memory DIMM Info ---"
-    dmidecode -t memory 2>/dev/null | grep -E "Size|Speed|Type|Locator" || true
+    dmidecode -t memory 2>/dev/null | grep -E "Size|Speed|Type|Locator|^$" | grep -Ev "None|Unknown" || true
 
     echo ""
     echo "--- Physical Memory Summary ---"
@@ -68,15 +68,15 @@ collect_static_info() {
 
     echo ""
     echo "--- Kernel Version ---"
-    uname -r && uname -v
+    uname -r
 
     echo ""
-    echo "--- GCC Version ---"
-    gcc --version 2>/dev/null | head -1 || true
+    echo "--- libgcc Version ---"
+    rpm -qa libgcc 2>/dev/null | head -1 || true
 
     echo ""
     echo "--- glibc Version ---"
-    ldd --version 2>/dev/null | head -1 || true
+    rpm -qa glibc 2>/dev/null | head -1 || true
 
     echo ""
     echo "========== Kernel Boot Parameters =========="
