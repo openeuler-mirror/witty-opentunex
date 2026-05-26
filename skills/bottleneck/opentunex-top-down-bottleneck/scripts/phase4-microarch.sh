@@ -62,8 +62,8 @@ collect_microarch() {
     echo "========== Cross-SCCL NUMA Analysis (ARM only) =========="
 
     echo "--- SCCL DRAM Access (15s, tolerate if unavailable) ---"
-    perf stat -e remote_access,ll_cache_miss -p "$PID" -- sleep "$DURATION" || echo "(remote_access/ll_cache_miss not available on this platform)"
-    echo "Cross-SCCL ratio = remote_access / (remote_access + ll_cache_miss) * 100%"
+    perf stat -e remote_access,ll_cache,ll_cache_miss -p "$PID" -- sleep "$DURATION" || echo "(remote_access/ll_cache/ll_cache_miss not available on this platform)"
+    echo "Cross-SCCL ratio ≈ remote_access / (remote_access + ll_cache) * 100%"
 
 
     echo ""
