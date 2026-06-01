@@ -7,6 +7,14 @@ DESTDIR ?=
 
 SKILLS_DIR = $(DESTDIR)$(PREFIX)/skills
 
+INCLUDE_SKILLS = opentunex-remote-execution \
+                 opentunex-io-bottleneck \
+                 opentunex-lock-bottleneck \
+                 opentunex-mem-bottleneck \
+                 opentunex-net-bottleneck \
+                 opentunex-sched-bottleneck \
+                 opentunex-top-down-bottleneck
+
 .PHONY: all install clean test
 
 all: install
@@ -18,6 +26,7 @@ install-skills:
 	for skill in skills/*/opentunex-*; do \
 		[ -d "$$skill" ] || continue; \
 		basename=$$(basename $$skill); \
+		case " $(INCLUDE_SKILLS) " in *" $$basename "*) ;; *) continue;; esac; \
 		install -d $(SKILLS_DIR)/$$basename; \
 		for subdir in references scripts; do \
 			[ -d "$$skill/$$subdir" ] && install -d $(SKILLS_DIR)/$$basename/$$subdir; \
@@ -41,6 +50,7 @@ test-skills:
 	for skill in skills/*/opentunex-*; do \
 		[ -d "$$skill" ] || continue; \
 		basename=$$(basename $$skill); \
+		case " $(INCLUDE_SKILLS) " in *" $$basename "*) ;; *) continue;; esac; \
 		skill_md="$$skill/SKILL.md"; \
 		echo "validating: $$skill_md" ; \
 		if [ ! -f "$$skill_md" ]; then \
