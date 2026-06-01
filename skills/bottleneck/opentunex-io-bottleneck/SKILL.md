@@ -19,7 +19,7 @@ This skill performs OS-level I/O performance bottleneck analysis.
 
 ## Phase 1: Data Collection
 
-**Collection Command**: Run `scripts/collect_io_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect I/O metrics (default 15 seconds).
+**Collection Command**: (Execute only if `io_metrics_analysis.txt` e.g. does not exist) Run `scripts/collect_io_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect I/O metrics (default 15 seconds).
 
 **Output**:
 - System overview (CPU, memory, disk devices)
@@ -91,6 +91,15 @@ This skill performs OS-level I/O performance bottleneck analysis.
 1. [Recommendation 1]
 2. [Recommendation 2]
 ```
+
+---
+
+## Phase 4: output report to disk
+
+After the analysis is completed, write Phase 3 bottleneck analysis report into file in current working directory.
+
+**Saved File**: `io_bottleneck_report.md`
+**Report Content**: Includes all the fields in the Phase 3 Output Format (bottleneck conclusion, key evidence, bottleneck type, root cause inference, OS-level recommendations)
 
 ---
 

@@ -70,21 +70,21 @@ log_phase "phase2.1-global-bottleneck" bash "$SCRIPT_DIR/opentunex-phase2.1-glob
 
 log_phase "phase2.2-top-processes" bash "$SCRIPT_DIR/opentunex-phase2.2-top-processes.sh" --pid "$PID" --duration "$DURATION"
 
-log_phase "phase3.1-hotspot-function" bash "$SCRIPT_DIR/opentunex-phase3.1-hotspot-function.sh" --pid "$PID" --duration "$DURATION"
+log_phase "phase3.1-hotspot-function-analysis" bash "$SCRIPT_DIR/opentunex-phase3.1-hotspot-function.sh" --pid "$PID" --duration "$DURATION"
 
 log_phase "phase3.2-syscall-analysis" bash "$SCRIPT_DIR/opentunex-phase3.2-syscall-analysis.sh" --pid "$PID" --duration "$DURATION"
 
-log_phase "phase4-microarch" bash "$SCRIPT_DIR/opentunex-phase4-microarch.sh" --pid "$PID" --duration "$DURATION"
+log_phase "phase4-microarch-analysis" bash "$SCRIPT_DIR/opentunex-phase4-microarch.sh" --pid "$PID" --duration "$DURATION"
 
-log_phase "phase5.1-sched-bottleneck" bash "$SCRIPT_DIR/opentunex-phase5.1-sched-bottleneck.sh" --pid "$PID" --duration "$DURATION"
+log_phase "phase5.1-sched-metrics-analysis" bash "$SCRIPT_DIR/opentunex-phase5.1-sched-bottleneck.sh" --pid "$PID" --duration "$DURATION"
 
-log_phase "phase5.2-lock-bottleneck" bash "$SCRIPT_DIR/opentunex-phase5.2-lock-bottleneck.sh" --pid "$PID" --duration "$DURATION"
+log_phase "phase5.2-lock-metrics-analysis" bash "$SCRIPT_DIR/opentunex-phase5.2-lock-bottleneck.sh" --pid "$PID" --duration "$DURATION"
 
-log_phase "phase5.3-io-bottleneck" bash "$SCRIPT_DIR/opentunex-phase5.3-io-bottleneck.sh" --pid "$PID" --duration "$DURATION"
+log_phase "phase5.3-io-metrics-analysis" bash "$SCRIPT_DIR/opentunex-phase5.3-io-bottleneck.sh" --pid "$PID" --duration "$DURATION"
 
-log_phase "phase5.4-mem-bottleneck" bash "$SCRIPT_DIR/opentunex-phase5.4-mem-bottleneck.sh" --pid "$PID" --duration "$DURATION"
+log_phase "phase5.4-mem-metrics-analysis" bash "$SCRIPT_DIR/opentunex-phase5.4-mem-bottleneck.sh" --pid "$PID" --duration "$DURATION"
 
-log_phase "phase5.5-net-bottleneck" bash "$SCRIPT_DIR/opentunex-phase5.5-net-bottleneck.sh" --duration "$DURATION"
+log_phase "phase5.5-net-metrics-analysis" bash "$SCRIPT_DIR/opentunex-phase5.5-net-bottleneck.sh" --duration "$DURATION"
 
 echo "=== All Metrics Collection Complete ==="
 echo "Logs saved in: $LOG_DIR"

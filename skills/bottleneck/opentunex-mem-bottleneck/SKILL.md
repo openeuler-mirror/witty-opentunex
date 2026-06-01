@@ -19,7 +19,7 @@ This skill performs OS-level memory performance bottleneck analysis, including m
 
 ## Phase 1: Data Collection
 
-**Collection Command**: Run `scripts/collect_mem_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect memory metrics.
+**Collection Command**: (Execute only if `memory_metrics_analysis.txt` e.g. does not exist) Run `scripts/collect_mem_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect memory metrics.
 
 ---
 
@@ -93,6 +93,15 @@ This skill performs OS-level memory performance bottleneck analysis, including m
 1. [Recommendation 1]
 2. [Recommendation 2]
 ```
+
+---
+
+## Phase 4: output report to disk
+
+After the analysis is completed, write Phase 3 bottleneck analysis report into file in current working directory.
+
+**Saved File**: `mem_bottleneck_report.md`
+**Report Content**: Includes all the fields in the Phase 3 Output Format (bottleneck conclusion, key evidence, bottleneck type, root cause inference, OS-level recommendations)
 
 ---
 
