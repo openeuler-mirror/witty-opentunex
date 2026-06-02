@@ -53,6 +53,16 @@ parse_param() {
         echo "Usage: bash $0 --pid <PID> [--duration <SECONDS>]" >&2
         exit 1
     fi
+
+    if ! [[ "$PID" =~ ^[0-9]+$ ]]; then
+        echo "Error: --pid must be a numeric value, got: $PID" >&2
+        exit 1
+    fi
+
+    if [ ! -d "/proc/$PID" ]; then
+        echo "Error: Process with PID $PID does not exist" >&2
+        exit 1
+    fi
 }
 
 collect_microarch() {

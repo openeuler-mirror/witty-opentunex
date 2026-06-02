@@ -33,6 +33,18 @@ parse_param() {
                 ;;
         esac
     done
+
+    if [ -n "$TARGET_PID" ]; then
+        if ! [[ "$TARGET_PID" =~ ^[0-9]+$ ]]; then
+            echo "Error: --pid must be a numeric value, got: $TARGET_PID" >&2
+            exit 1
+        fi
+
+        if [ ! -d "/proc/$TARGET_PID" ]; then
+            echo "Error: Process with PID $TARGET_PID does not exist" >&2
+            exit 1
+        fi
+    fi
 }
 
 collect_mem_metrics() {
