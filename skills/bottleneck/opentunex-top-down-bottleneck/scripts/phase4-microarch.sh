@@ -2,14 +2,28 @@
 # =============================================================================
 # phase4-microarch.sh — Phase 4: Microarchitecture Bottleneck Analysis
 # =============================================================================
-# Usage: bash phase4-microarch.sh --pid <PID> [--duration <SECONDS>]
+#
+# Usage:
+#   bash phase4-microarch.sh --pid <PID> [--duration <SECONDS>]
+#
 # Parameters:
 #   --pid      — Target process ID (required)
 #   --duration — Collection duration in seconds (optional, default: 15)
+#
 # Requires: perf, root privilege. Total runtime: ~3-4 minutes.
 # ⚠️ HEAVYWEIGHT: All perf stat groups are serialized — PMU counter
 #   multiplexing produces unreliable results if run in parallel.
 # ⚠️ Must run AFTER phase3 completes (perf record/strace also use PMU).
+#
+# Examples:
+#   # Collect for PID 12345 with default duration:
+#   bash phase4-microarch.sh --pid 12345
+#
+#   # Collect for PID 12345 for 30 seconds:
+#   bash phase4-microarch.sh --pid 12345 --duration 30
+#
+# Save output to file:
+#   bash phase4-microarch.sh --pid 12345 --duration 30 > phase4_result.txt 2>&1
 # =============================================================================
 
 DURATION=15

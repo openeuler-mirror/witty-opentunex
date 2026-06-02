@@ -2,13 +2,27 @@
 # =============================================================================
 # phase3.1-hotspot-function.sh — Phase 3.1: Hotspot Function Analysis
 # =============================================================================
-# Usage: bash phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]
+#
+# Usage:
+#   bash phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]
+#
 # Parameters:
 #   --pid      — Target process ID (required)
 #   --duration — Collection duration in seconds (optional, default: 15)
+#
 # Requires: perf, root privilege. Total runtime: ~30-45 seconds (single 99Hz 15s record).
 # ⚠️ HEAVYWEIGHT: Do NOT run concurrently with strace or other perf commands
 #   on the same PID.
+#
+# Examples:
+#   # Collect for PID 12345 with default duration:
+#   bash phase3.1-hotspot-function.sh --pid 12345
+#
+#   # Collect for PID 12345 for 30 seconds:
+#   bash phase3.1-hotspot-function.sh --pid 12345 --duration 30
+#
+# Save output to file:
+#   bash phase3.1-hotspot-function.sh --pid 12345 --duration 30 > phase3.1_result.txt 2>&1
 # =============================================================================
 
 DURATION=15

@@ -16,7 +16,7 @@ This skill performs a five-phase analysis:
 
 The skill focuses exclusively on OS-level resource bottlenecks. It does NOT collect, analyze, or provide recommendations for application-layer data (database queries, JVM heap, application logs, etc.).
 The skill supports iterative refinement until sufficient analysis is achieved.
-First try to read from user-given data collection files, if data is not enough, provides script to user to conduct supplementary collection.
+First try to read from user-given data collection files, if data is not enough, **prioritize referencing existing scripts under this skill's `scripts/` directory** — provide the script path and usage. Only if no existing script covers the needed commands, generate a new script and **simultaneously write it to a file in the current working directory** (following the naming convention in the Analysis Command Execution rule below), along with usage instructions, to conduct supplementary collection.
 
 ---
 
@@ -24,7 +24,7 @@ First try to read from user-given data collection files, if data is not enough, 
 
 [1] only if **USER** has specified that remote command execution are allowed, Load the `remote-execution` skill for standardized SSH connection and command execution.
 
-[2] otherwise, Keep the following rule for command execution: Always read from user-given data collection files to analyze, command execution results should be saved in these files, if some extra commands are needed for analysis, output command execution script to **USER**, and ask **USER** to provide execution results, never execute command automatically.
+[2] otherwise, Keep the following rule for command execution: Always read from user-given data collection files to analyze, command execution results should be saved in these files, if some extra commands are needed for analysis, **prioritize referencing existing scripts under this skill's `scripts/` directory** — provide the script path and usage. Only if no existing script covers the needed commands, generate a new script: output it to **USER** in the conversation, **simultaneously write it to a file in the current working directory** using the naming convention `<skill-name>-collect-step<N>.sh` (increment N each round, starting from 1; replace `<skill-name>` with this skill's short name, e.g., `topdown-bottleneck`). In all cases, provide usage instructions including: (1) how to execute the script, (2) how to save output (e.g., redirect to a results file), (3) ask user to provide the result file for subsequent analysis. Never execute command automatically.
 
 ---
 
@@ -38,7 +38,7 @@ First try to read from user-given data collection files, if data is not enough, 
 
 **Objective**: Gather static system environment information — hardware specifications, software versions, and kernel boot parameters. This phase collects **static** facts about the system, not dynamic runtime metrics.
 
-**Collection Command**: (Execute only if `static_info.txt` e.g. does not exist) Run `scripts/phase1-static-info.sh` to collect static system information.
+**Collection Command**: Run `scripts/phase1-static-info.sh` to collect static system information.
 
 **Output**: Static system profile: hardware specs (CPU model/core count/NUMA, memory size, disk types, NIC models), software versions (OS, kernel, tools), kernel boot parameters and key sysctl settings.
 
@@ -48,7 +48,7 @@ First try to read from user-given data collection files, if data is not enough, 
 
 ### Step 2.1: Global Resource Bottleneck Identification
 
-**Collection Command**: (Execute only if `global_bottleneck.txt` e.g. does not exist) Run `scripts/phase2.1-global-bottleneck.sh` to collect global resource bottleneck indicators.
+**Collection Command**: Run `scripts/phase2.1-global-bottleneck.sh` to collect global resource bottleneck indicators.
 
 Identify bottleneck characteristics across CPU, memory, I/O, and network. Use specific metrics to pinpoint resource pressure.
 
@@ -73,7 +73,7 @@ Identify bottleneck characteristics across CPU, memory, I/O, and network. Use sp
 
 ### Step 2.2: Top Resource Process Identification
 
-**Collection Command**: (Execute only if `top_processes.txt` e.g. does not exist) Run `scripts/phase2.2-top-processes.sh` to collect top resource-consuming processes.
+**Collection Command**: Run `scripts/phase2.2-top-processes.sh` to collect top resource-consuming processes.
 
 From Step 2.1, identify top resource-consuming processes and perform detailed OS-level analysis. **Focus on resource consumption patterns (CPU%, syscalls, context switches, I/O wait) — do NOT analyze application internals (query plans, heap dumps, application logic).**
 
@@ -87,7 +87,7 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 ### Step 3.1: Hotspot Function Analysis
 
-**Collection Command**: (Execute only if `hotspot_analysis.txt` e.g. does not exist) Run `scripts/phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]` to collect hotspot function data.
+**Collection Command**: Run `scripts/phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]` to collect hotspot function data.
 
 **Key Metrics to Analyze**:
 
@@ -104,7 +104,7 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 ### Step 3.2: Syscall Analysis
 
-**Collection Command**: (Execute only if `syscall_analysis.txt` e.g. does not exist) Run `scripts/phase3.2-syscall-analysis.sh --pid <PID> [--duration <SECONDS>]` to collect syscall data. Must run AFTER Phase 3.1 completes.
+**Collection Command**: Run `scripts/phase3.2-syscall-analysis.sh --pid <PID> [--duration <SECONDS>]` to collect syscall data. Must run AFTER Phase 3.1 completes.
 
 **Key Metrics to Analyze**:
 
@@ -121,7 +121,7 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 ## Phase 4: Microarchitecture Bottleneck Analysis
 
-**Collection Command**: (Execute only if `microarch_analysis.txt` e.g. does not exist) Run `scripts/phase4-microarch.sh --pid <PID> [--duration <SECONDS>]` to collect microarchitecture PMU data. Must run AFTER Phase 3 completes.
+**Collection Command**: Run `scripts/phase4-microarch.sh --pid <PID> [--duration <SECONDS>]` to collect microarchitecture PMU data. Must run AFTER Phase 3 completes.
 
 Use PMU (Performance Monitoring Unit) events to identify cache, branch, and pipeline bottlenecks:
 
@@ -238,33 +238,35 @@ skill:sched-bottleneck
 
 ## Phase 6: Evidence-Based Bottleneck Analysis
 
-**Requirement**: Every bottleneck claim MUST be backed by specific evidence from collected data. No vague or speculative statements.
+**Requirement**: Every bottleneck claim MUST be backed by specific evidence from Phases 1-5. No vague or speculative statements.
 
-**Evidence chain**: Link findings across all collected data to form a complete causal chain, if certain config or data is missing for confirm evidence chain, collect it by extra. Relevant data should be analyzed in a correlated manner to analyze their mutual influence, and the validity of the analysis should be confirmed from as many sources as possible. Root cause inference must connect observed metrics to system behavior.
+**Evidence chain**: Link findings across phases to form a complete causal chain:
+
+```
+Phase 1 (Static) → Phase 2.1 (Global) → Phase 2.2 (Process) → Phase 3 (Hotspot) → Phase 4 (Microarch) → Phase 5 (Specialized)
 
 Example evidence chain:
+1. Phase 2.1: %iowait > 30%, disk %util > 90% (global I/O saturation)
+2. Phase 2.2: process XYZ reads 50MB/s, major culprit
+3. Phase 3: perf shows 60% time in ext4_readpage, syscall read() blocked
+4. Phase 4: LLC miss rate 45% (critical), memory bound
+5. Conclusion: I/O bound process with LLC thrashing, recommend I/O scheduler tuning
 ```
-%iowait > 30%, disk %util > 90% (global I/O saturation)
- ↓
-process XYZ reads 50MB/s, major culprit
- ↓
-perf shows 60% time in ext4_readpage, syscall read() blocked
- ↓
-LLC miss rate 45% (critical), memory bound
-```
-**Root Cause**: Describe OS-level root cause for one sentense， e.g. I/O bound process with LLC thrashing, excessive page cache pressure.
 
-**evidence mapping**: Give evidence of each bottleneck, providing key finds
+**Example evidence mapping** (values from Phase 1-5 outputs):
 
-Example evidence mapping:
+| Bottleneck | Phase 2.1 Finding | Phase 2.2/3 Finding | Phase 4 Finding | Inferred Root Cause |
+|------------|------------------|---------------------|-----------------|---------------------|
+| CPU I/O Wait | %iowait=35%, disk %util=95% | proc XYZ read=50MB/s | - | Disk saturation causing I/O wait |
+| Memory Pressure | majflt/s=1500, SwapUsed=60% | proc ABC VmRSS=8GB | CPI=2.8 (memory bound) | Swap thrashing, insufficient RAM |
+| Cache Bound | - | - | LLC miss rate=45%, CPI=3.2 | Memory access pattern issue |
+| Lock Contention | cs/s=65000, softirq%=25% | futex wait=80% | - | Userspace lock contention |
+| NUMA Imbalance | - | - | cross-SCCL=55% | Process bound to remote SCCL |
 
-| Bottleneck | Key Findings | Related Process | Evidence Source |
-|------------|--------------|-----------------|-----------------|
-| CPU I/O Wait              | %iowait=35%, disk %util=95%, proc XYZ read=50MB/s       | [myusql ipi] | [Phase_xxx.txt/Phase name/Skill name] |
-| Memory Pressure           | majflt/s=1500, SwapUsed=60%, proc ABC VmRSS=8GB CPI=2.8 | [myusql ipi] | [Phase_xxx.txt/Phase name/Skill name] |
-| Memory access pattern     | LLC miss rate=45%, CPI=3.2                              | [myusql ipi] | [Phase_xxx.txt/Phase name/Skill name] |
-| Userspace Lock Contention | cs/s=65000, softirq%=25%, futex wait=80%                | [myusql ipi] | [Phase_xxx.txt/Phase name/Skill name] |
-| NUMA Imbalance            | cross-SCCL=55%                                          | [myusql ipi] | [Phase_xxx.txt/Phase name/Skill name] |
+**Evidence requirements**:
+- Each bottleneck claim MUST cite evidence from at least Phase 2.1 or 2.2
+- Critical/High severity requires Phase 3 or 4 supporting evidence
+- Root cause inference must connect observed metrics to system behavior
 
 **Bottleneck prioritization**:
 
@@ -275,34 +277,9 @@ Example evidence mapping:
 
 ---
 
-## Phase 7: Output report to Disk (Required) 
-
-After analysis is complete, write the full bottleneck analysis report into file in current working directory.
+## Output Template
 
 reference:output-template
-
-**Saved File**: `top_down_bottleneck_report.md`
-**Report Content**: follows the output template and must include bottleneck analysis results and OS-level tuning suggestions for each bottleneck.
-
-**bottleneck analysis results rules**:
-1. Bottleneck list should be sorted by the degree of impact on performance.
-2. Bottleneck Evidence Chain should link findings across phases to form a complete causal chain: Global → Process → Hotspot → Microarch → Specialized.
-3. Evidence mapping should map each bottleneck to evidence from Phase 1-5.
-
-**tuning suggestions should be sorted according to following rules**:
-1. Sorted by expected benefit level from high to low, based on severity of bottlenecks;
-2. Sorted by enablement difficulty from low to high if same benefit level (difficulty ranking: modifying config parameters < enabling optimization features < modifying compilation option < modifying code)
-
-**Allowed tuning suggestions - OS-Level Changes**: (e.g., not limited to)
-- **Kernel/subsystem tunables**: `sysctl` variables (e.g., `vm.swappiness`), `/proc` paths, `/sys` paths, boot param options like `hugepages`
-- **Compiler-level optimizations**: compiler flags that affect binary performance (e.g., `-O3`, `-march=native`, `-fbranch-probabilities`) — these optimize how the application binary runs without changing application source code
-- **OS-level library replacements**: swapping OS-level libraries that affect process behavior (e.g., replacing glibc `malloc` with `jemalloc` via `LD_PRELOAD` or system-wide linker config — this changes memory allocator behavior at the OS level, not the application level)
-- **OS basic service tuning**: tuning OS-level services that affect system performance (e.g., `irqbalance` service, `tuned`/`sysctl` for profile-based tuning)
-- **OS resource management**: cgroups, namespaces, CPU affinity, process priority (`nice`/`renice`), NUMA policy (`numactl`), 
-
-**NOT Allowed tuning suggestions — Application-Layer Changes**:
-- Application source code or logic changes
-- Application configuration files or parameters (e.g., MySQL `innodb_buffer_pool_size`, PostgreSQL `shared_buffers`, JVM `-Xmx`, Redis `maxmemory`, application business logic)
 
 ---
 
@@ -312,12 +289,3 @@ reference:output-template
 - **Iteration**: If evidence is insufficient, narrow focus (e.g., container/port/device) and deepen analysis; reuse existing data if system state unchanged; Phase 5 deep-dive is required for Critical/High severity.
 - **Completion**: All phases must be fully executed before concluding; stop only when evidence is complete and user confirms. All phases result should be included in analysis summary.
 - **Scope Constraint — OS Level Only**: This skill analyzes ONLY OS-level information and bottlenecks. Do NOT collect, interpret, or provide recommendations based on application-layer data (e.g., MySQL query plans, PostgreSQL EXPLAIN output, Java heap/Garbage Collection logs, Redis command traces, application configuration files, application business logic). If application-layer issues are detected (e.g., a process spending excessive time in application code), describe it at the OS level (e.g., "process spending 80% CPU time in user space") without diving into application internals.
-- **Completeness Checklist**: Analysis is complete only when ALL phases are checked.
-    - [x] Phase 1: System environment static info collected
-    - [x] Phase 2.1: Global resource bottleneck identified (CPU/Memory/IO/Network)
-    - [x] Phase 2.2: Top resource-consuming processes identified
-    - [x] Phase 3.1: Hot function analysis completed for top processes
-    - [x] Phase 3.2: Syscall analysis completed for top processes
-    - [x] Phase 4: Microarchitecture metrics collected and assessed
-    - [x] Phase 5: Deep-dive via specialized skills (if Critical/High identified)
-    - [x] Phase 6: Evidence-Based Bottleneck Analysis

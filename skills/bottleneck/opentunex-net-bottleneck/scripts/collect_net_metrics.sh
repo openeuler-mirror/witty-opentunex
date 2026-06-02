@@ -1,6 +1,21 @@
 #!/bin/bash
 # collect_net_metrics.sh - Collect network metrics for bottleneck analysis
-# Usage: collect_net_metrics.sh [--duration <SECONDS>]
+#
+# Usage:
+#   bash collect_net_metrics.sh [--duration <SECONDS>]
+#
+# Parameters:
+#   --duration — Collection duration in seconds (default: 10)
+#
+# Examples:
+#   # Default 10-second collection:
+#   bash collect_net_metrics.sh
+#
+#   # 30-second collection:
+#   bash collect_net_metrics.sh --duration 30
+#
+# Save output to file:
+#   bash collect_net_metrics.sh --duration 30 > net_result.txt 2>&1
 
 DURATION=10
 INTERVAL=1

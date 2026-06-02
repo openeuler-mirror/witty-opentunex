@@ -1,6 +1,21 @@
 #!/bin/bash
 # collect_mem_metrics.sh - Collect memory metrics for bottleneck analysis
-# Usage: collect_mem_metrics.sh [--pid <PID>]
+#
+# Usage:
+#   bash collect_mem_metrics.sh [--pid <PID>]
+#
+# Parameters:
+#   --pid — Target process PID (optional)
+#
+# Examples:
+#   # System-wide collection:
+#   bash collect_mem_metrics.sh
+#
+#   # Target process collection:
+#   bash collect_mem_metrics.sh --pid 12345
+#
+# Save output to file:
+#   bash collect_mem_metrics.sh --pid 12345 > mem_result.txt 2>&1
 
 TARGET_PID=""
 
