@@ -16,11 +16,7 @@ This skill provides standardized client connection and command execution capabil
 **setup client connection**:
 1. Extract client IP from user context (e.g., from "192.168.1.100" or "root@192.168.1.100" in user input)
 2. Test passwordless SSH connection with extracted IP, if successful, setup done;
-3. setup passwordless SSH connection
-    3.1 read client auth info (username, password, port) corresponding to the IP in `/opt/opentunex/config/client.yaml`
-      - if found, test if SSH connection works with the given auth info
-      - if not found or connection test fails, ask user to provide correct auth info, and append auth info to `/opt/opentunex/config/client.yaml`
-    3.2 generate public key for local machine if not existing, add public key to the client to ensure passwordless connection.
+3. If passwordless SSH connection test fails, ask user to provide correct auth info, generate public key if not existing, and copy public key to the client to ensure passwordless connection.
 
 ## Remote Command Execution Guide
 
