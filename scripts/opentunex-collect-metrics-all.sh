@@ -48,7 +48,7 @@ echo "Duration: $DURATION seconds"
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="/tmp/opentunex-log-$(date +%Y%m%d-%H%M%S)"
+LOG_DIR="/tmp/opentunex-profiling-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$LOG_DIR"
 
 echo "Log directory: $LOG_DIR"
