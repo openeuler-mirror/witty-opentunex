@@ -1,6 +1,21 @@
 #!/bin/bash
 # collect_mem_metrics.sh - Collect memory metrics for bottleneck analysis
-# Usage: collect_mem_metrics.sh [--pid <PID>]
+#
+# Usage:
+#   bash collect_mem_metrics.sh [--pid <PID>]
+#
+# Parameters:
+#   --pid — Target process PID (optional)
+#
+# Examples:
+#   # System-wide collection:
+#   bash collect_mem_metrics.sh
+#
+#   # Target process collection:
+#   bash collect_mem_metrics.sh --pid 12345
+#
+# Save output to file:
+#   bash collect_mem_metrics.sh --pid 12345 > mem_result.txt 2>&1
 
 TARGET_PID=""
 
@@ -18,6 +33,18 @@ parse_param() {
                 ;;
         esac
     done
+
+    if [ -n "$TARGET_PID" ]; then
+        if ! [[ "$TARGET_PID" =~ ^[0-9]+$ ]]; then
+            echo "Error: --pid must be a numeric value, got: $TARGET_PID" >&2
+            exit 1
+        fi
+
+        if [ ! -d "/proc/$TARGET_PID" ]; then
+            echo "Error: Process with PID $TARGET_PID does not exist" >&2
+            exit 1
+        fi
+    fi
 }
 
 collect_mem_metrics() {

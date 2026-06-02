@@ -57,11 +57,9 @@ for skill in skills/*/*/; do
     cp -r "$skill" ~/.config/opencode/skills/
 done
 
-# 或按类别安装：
-# 瓶颈分析
-for s in skills/bottleneck/*/; do cp -r "$s" ~/.config/opencode/skills/; done
-# 优化及辅助
-for s in skills/optimization/*/ skills/auxiliary/*/; do cp -r "$s" ~/.config/opencode/skills/; done
+# 仅安装OS层瓶颈分析：
+cp -r skills/auxiliary/opentunex-remote-execution ~/.config/opencode/skills/
+cp -r skills/bottleneck/opentunex-{top-down,sched,lock,io,mem,net}-bottleneck ~/.config/opencode/skills/
 ```
 
 安装 opentunex-assistant agent：
@@ -97,15 +95,15 @@ opencode
 当前需要从操作系统层面分析目标环境的性能瓶颈、优化建议，输出一份瓶颈链充分的诊断报告。
 
 ## 采集模式
-- 自动：直接在调优目标环境中自动运行需要的采集命令，目标环境为IP【例如 XX.XX.XX.XX】
+- 自动：直接在调优目标环境中自动运行需要的采集命令，目标环境为IP【例如 XX.XX.XX.XX】。
 
 ## 场景指标
-测试场景为【例如 mysql sysbench】，优化指标为【例如 tps】
+测试场景为【例如 mysql sysbench】，优化指标为【例如 tps】。
 
-## 其他说明（可选输入）
-- 压测方式：【例如 wrk -t4 -c200 -d60s / Jmeter 并发 500】
-- 约束限制：【例如 不可调节应用层配置参数、benchmark参数】
-- 异常表现：【例如 p99 延迟从 50ms 剧增到 800ms，CPU 使用率仅 35%】
+## 其他说明
+- 压测方式：【例如 wrk -t4 -c200 -d60s / Jmeter 并发 500】（可选输入）
+- 约束限制：【例如 不可调节应用层配置参数、benchmark参数】（可选输入）
+- 异常表现：【例如 p99 延迟从 50ms 剧增到 800ms，CPU 使用率仅 35%】（可选输入）
 ```
 
 4、等待调优Agent进行自动化分析，报告输出瓶颈分析结果/优化建议。
@@ -116,9 +114,9 @@ opencode
 
 性能瓶颈分析/调优步骤：
 
-1、调优目标环境运行benchmark负载（建议循环运行benchmark直到分析结束），并运行采集脚本 `scripts/opentunex-collect-metrics-all.sh`。
+1、调优目标环境运行benchmark负载（建议循环运行benchmark直到分析结束），并上传scripts目录下所有脚本后运行 `bash opentunex-collect-metrics-all.sh`。
 
-2、收集目标环境上的采集日志 `/tmp/opentunex-log-XXX` ，传回调优Agent环境中。
+2、收集目标环境上的采集日志 `/tmp/opentunex-profiling-XXX` ，传回调优Agent环境中。
 
 3、启动调优Agent会话，输入：
 
@@ -127,15 +125,15 @@ opencode
 当前需要从操作系统层面分析目标环境的性能瓶颈、优化建议，输出一份瓶颈链充分的诊断报告。
 
 ## 采集模式
-- 手动：调优目标环境的采集数据已放置在目录【例如 /tmp/profiling_xxx】
+- 手动：远程调优目标环境无法自动连接，数据需要人工手动采集，当前采集数据已放置在目录【例如 /tmp/opentunex-profiling-XXX】。
 
 ## 场景指标
-测试场景为【例如 mysql sysbench】，优化指标为【例如 tps】
+测试场景为【例如 mysql sysbench】，优化指标为【例如 tps】。
 
-## 优化场景（可选输入）
-- 压测方式：【例如 wrk -t4 -c200 -d60s / Jmeter 并发 500】
-- 约束限制：【例如 不可调节应用层配置参数、benchmark参数】
-- 异常表现：【例如 p99 延迟从 50ms 剧增到 800ms，CPU 使用率仅 35%】
+## 其他说明
+- 压测方式：【例如 wrk -t4 -c200 -d60s / Jmeter 并发 500】（可选输入）
+- 约束限制：【例如 不可调节应用层配置参数、benchmark参数】（可选输入）
+- 异常表现：【例如 p99 延迟从 50ms 剧增到 800ms，CPU 使用率仅 35%】（可选输入）
 ```
 
 4、等待调优Agent进行自动化分析，报告输出瓶颈分析结果/优化建议；若需要进一步的采集，则Agent会给出下一步需执行的采集脚本，新采集脚本传到目标环境之后重复第1步。

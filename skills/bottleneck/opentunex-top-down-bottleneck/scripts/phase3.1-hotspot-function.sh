@@ -2,13 +2,27 @@
 # =============================================================================
 # phase3.1-hotspot-function.sh — Phase 3.1: Hotspot Function Analysis
 # =============================================================================
-# Usage: bash phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]
+#
+# Usage:
+#   bash phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]
+#
 # Parameters:
 #   --pid      — Target process ID (required)
 #   --duration — Collection duration in seconds (optional, default: 15)
+#
 # Requires: perf, root privilege. Total runtime: ~30-45 seconds (single 99Hz 15s record).
 # ⚠️ HEAVYWEIGHT: Do NOT run concurrently with strace or other perf commands
 #   on the same PID.
+#
+# Examples:
+#   # Collect for PID 12345 with default duration:
+#   bash phase3.1-hotspot-function.sh --pid 12345
+#
+#   # Collect for PID 12345 for 30 seconds:
+#   bash phase3.1-hotspot-function.sh --pid 12345 --duration 30
+#
+# Save output to file:
+#   bash phase3.1-hotspot-function.sh --pid 12345 --duration 30 > phase3.1_result.txt 2>&1
 # =============================================================================
 
 DURATION=15
@@ -36,6 +50,16 @@ parse_param() {
     if [ -z "$PID" ]; then
         echo "Error: --pid is required" >&2
         echo "Usage: bash $0 --pid <PID> [--duration <SECONDS>]" >&2
+        exit 1
+    fi
+
+    if ! [[ "$PID" =~ ^[0-9]+$ ]]; then
+        echo "Error: --pid must be a numeric value, got: $PID" >&2
+        exit 1
+    fi
+
+    if [ ! -d "/proc/$PID" ]; then
+        echo "Error: Process with PID $PID does not exist" >&2
         exit 1
     fi
 }

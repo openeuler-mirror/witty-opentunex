@@ -2,8 +2,15 @@
 # =============================================================================
 # phase2.2-top-processes.sh — Phase 2.2: Top Resource Process Identification
 # =============================================================================
-# Usage: bash phase2.2-top-processes.sh
-# No parameters required. iotop requires root.
+#
+# Usage:
+#   bash phase2.2-top-processes.sh
+#
+# Description:
+#   No parameters required. iotop requires root.
+#
+# Save output to file:
+#   bash phase2.2-top-processes.sh > phase2.2_result.txt 2>&1
 # =============================================================================
 
 

@@ -1,6 +1,22 @@
 #!/bin/bash
 # collect_io_metrics.sh - Collect I/O metrics for bottleneck analysis
-# Usage: collect_io_metrics.sh [--pid <PID>] [--duration <SECONDS>]
+#
+# Usage:
+#   bash collect_io_metrics.sh [--pid <PID>] [--duration <SECONDS>]
+#
+# Parameters:
+#   --pid      — Target process PID (optional)
+#   --duration — Collection duration in seconds (default: 15)
+#
+# Examples:
+#   # System-wide collection for 30 seconds:
+#   bash collect_io_metrics.sh --duration 30
+#
+#   # Target process collection:
+#   bash collect_io_metrics.sh --pid 12345 --duration 30
+#
+# Save output to file:
+#   bash collect_io_metrics.sh --pid 12345 --duration 30 > io_result.txt 2>&1
 
 DURATION=15
 TARGET_PID=""
@@ -24,6 +40,18 @@ parse_param() {
                 ;;
         esac
     done
+
+    if [ -n "$TARGET_PID" ]; then
+        if ! [[ "$TARGET_PID" =~ ^[0-9]+$ ]]; then
+            echo "Error: --pid must be a numeric value, got: $TARGET_PID" >&2
+            exit 1
+        fi
+
+        if [ ! -d "/proc/$TARGET_PID" ]; then
+            echo "Error: Process with PID $TARGET_PID does not exist" >&2
+            exit 1
+        fi
+    fi
 }
 
 collect_io_metrics() {

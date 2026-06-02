@@ -2,10 +2,14 @@
 # =============================================================================
 # phase3.2-syscall-analysis.sh — Phase 3.2: Syscall Analysis
 # =============================================================================
-# Usage: bash phase3.2-syscall-analysis.sh --pid <PID> [--duration <SECONDS>]
+#
+# Usage:
+#   bash phase3.2-syscall-analysis.sh --pid <PID> [--duration <SECONDS>]
+#
 # Parameters:
 #   --pid      — Target process ID (required)
 #   --duration — Collection duration in seconds (optional, default: 10)
+#
 # Requires: strace, root privilege. Total runtime: depends on duration.
 # ⚠️ HEAVYWEIGHT: Must run AFTER phase3.1 completes. Do NOT run concurrently
 #   with perf record/perf stat on the same PID.
@@ -15,6 +19,16 @@
 # ⚠️ strace -c -f shows per-syscall aggregate counts/times/errors across all
 #   threads. strace -T -f shows wall-clock time spent in each individual
 #   syscall invocation, useful for outlier latency analysis.
+#
+# Examples:
+#   # Collect for PID 12345 with default duration:
+#   bash phase3.2-syscall-analysis.sh --pid 12345
+#
+#   # Collect for PID 12345 for 20 seconds:
+#   bash phase3.2-syscall-analysis.sh --pid 12345 --duration 20
+#
+# Save output to file:
+#   bash phase3.2-syscall-analysis.sh --pid 12345 --duration 20 > phase3.2_result.txt 2>&1
 # =============================================================================
 
 DURATION=10
@@ -42,6 +56,16 @@ parse_param() {
     if [ -z "$PID" ]; then
         echo "Error: --pid is required" >&2
         echo "Usage: bash $0 --pid <PID> [--duration <SECONDS>]" >&2
+        exit 1
+    fi
+
+    if ! [[ "$PID" =~ ^[0-9]+$ ]]; then
+        echo "Error: --pid must be a numeric value, got: $PID" >&2
+        exit 1
+    fi
+
+    if [ ! -d "/proc/$PID" ]; then
+        echo "Error: Process with PID $PID does not exist" >&2
         exit 1
     fi
 }

@@ -2,9 +2,16 @@
 # =============================================================================
 # phase2.1-global-bottleneck.sh — Phase 2.1: Global Resource Bottleneck
 # =============================================================================
-# Usage: bash phase2.1-global-bottleneck.sh
-# No parameters required. All commands are lightweight and safe to serialize.
-# Total runtime: ~30 seconds (5s sampling × 4 resource categories, sequential).
+#
+# Usage:
+#   bash phase2.1-global-bottleneck.sh
+#
+# Description:
+#   No parameters required. All commands are lightweight and safe to serialize.
+#   Total runtime: ~30 seconds (5s sampling × 4 resource categories, sequential).
+#
+# Save output to file:
+#   bash phase2.1-global-bottleneck.sh > phase2.1_result.txt 2>&1
 # =============================================================================
 
 

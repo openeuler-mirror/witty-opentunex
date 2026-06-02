@@ -2,9 +2,16 @@
 # =============================================================================
 # phase1-static-info.sh — Phase 1: System Environment Static Information
 # =============================================================================
-# Usage: bash phase1-static-info.sh
-# No parameters required. Must run as root for dmidecode/ethtool.
-# All commands are lightweight (read-only), but serialized for simplicity.
+#
+# Usage:
+#   bash phase1-static-info.sh
+#
+# Description:
+#   No parameters required. Must run as root for dmidecode/ethtool.
+#   All commands are lightweight (read-only), but serialized for simplicity.
+#
+# Save output to file:
+#   bash phase1-static-info.sh > phase1_result.txt 2>&1
 # =============================================================================
 
 

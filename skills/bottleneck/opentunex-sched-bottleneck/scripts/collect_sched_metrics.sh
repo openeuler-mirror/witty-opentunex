@@ -1,8 +1,22 @@
 #!/bin/bash
 # collect_sched_metrics.sh - Collect and analyze scheduling trace metrics
-# Usage: collect_sched_metrics.sh [--pid <PID>] [--duration <SECONDS>]
-#   PID: Target process PID (optional, system-wide if not specified)
-#   DURATION: Collection duration in seconds (default: 5)
+#
+# Usage:
+#   bash collect_sched_metrics.sh [--pid <PID>] [--duration <SECONDS>]
+#
+# Parameters:
+#   --pid      — Target process PID (optional, system-wide if not specified)
+#   --duration — Collection duration in seconds (default: 5)
+#
+# Examples:
+#   # System-wide collection for 10 seconds:
+#   bash collect_sched_metrics.sh --duration 10
+#
+#   # Target process collection:
+#   bash collect_sched_metrics.sh --pid 12345 --duration 10
+#
+# Save output to file:
+#   bash collect_sched_metrics.sh --pid 12345 --duration 10 > sched_result.txt 2>&1
 
 DURATION=5
 TARGET_PID=""
@@ -25,6 +39,18 @@ parse_param() {
                 ;;
         esac
     done
+
+    if [ -n "$TARGET_PID" ]; then
+        if ! [[ "$TARGET_PID" =~ ^[0-9]+$ ]]; then
+            echo "Error: --pid must be a numeric value, got: $TARGET_PID" >&2
+            exit 1
+        fi
+
+        if [ ! -d "/proc/$TARGET_PID" ]; then
+            echo "Error: Process with PID $TARGET_PID does not exist" >&2
+            exit 1
+        fi
+    fi
 }
 
 collect_sched_metrics() {

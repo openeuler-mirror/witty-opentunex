@@ -13,13 +13,13 @@ This skill performs scheduling trace analysis using perf tools.
 
 [1] only if **USER** has specified that remote command execution are allowed, Load the `remote-execution` skill for standardized SSH connection and command execution.
 
-[2] otherwise, Keep the following rule for command execution: Always read from user-given data collection files to analyze, command execution results should be saved in these files, if some extra commands are needed for analysis, output command execution script to **USER**, and ask **USER** to provide execution results, never execute command automatically.
+[2] otherwise, Keep the following rule for command execution: Always read from user-given data collection files to analyze, command execution results should be saved in these files, if some extra commands are needed for analysis, **prioritize referencing existing scripts under this skill's `scripts/` directory** — provide the script path and usage. Only if no existing script covers the needed commands, generate a new script: output it to **USER** in the conversation, **simultaneously write it to a file in the current working directory** using the naming convention `<skill-name>-collect-step<N>.sh` (increment N each round, starting from 1; replace `<skill-name>` with this skill's short name, e.g., `sched-bottleneck`). In all cases, provide usage instructions including: (1) how to execute the script, (2) how to save output (e.g., redirect to a results file), (3) ask user to provide the result file for subsequent analysis. Never execute command automatically.
 
 ---
 
 ## Phase 1: Data Collection
 
-**Collection Command**: (Execute only if `sched_metrics_analysis.txt` e.g. does not exist) Run `scripts/collect_sched_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect and analyze scheduling trace data (default 5 seconds, PID optional).
+**Collection Command**: Run `scripts/collect_sched_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect and analyze scheduling trace data (default 5 seconds, PID optional).
 
 ---
 
@@ -115,15 +115,6 @@ This skill performs scheduling trace analysis using perf tools.
 1. [Recommendation 1]
 2. [Recommendation 2]
 ```
-
----
-
-## Phase 4: output report to disk
-
-After the analysis is completed, write Phase 3 bottleneck analysis report into file in current working directory.
-
-**Saved File**: `sched_bottleneck_report.md`
-**Report Content**: Includes all the fields in the Phase 3 Output Format (bottleneck conclusion, key evidence, bottleneck type, root cause inference, OS-level recommendations)
 
 ---
 
