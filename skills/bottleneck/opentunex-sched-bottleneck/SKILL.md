@@ -11,15 +11,38 @@ This skill performs scheduling trace analysis using perf tools.
 
 ## Analysis Command Execution
 
-[1] only if **USER** has specified that remote command execution are allowed, Load the `remote-execution` skill for standardized SSH connection and command execution.
+[1] only if **USER** has specified that remote command execution are allowed, Load the `opentunex-remote-execution` skill for standardized SSH connection and command execution.
 
 [2] otherwise, Keep the following rule for command execution: Always read from user-given data collection files to analyze, command execution results should be saved in these files, if some extra commands are needed for analysis, **prioritize referencing existing scripts under this skill's `scripts/` directory** — provide the script path and usage. Only if no existing script covers the needed commands, generate a new script: output it to **USER** in the conversation, **simultaneously write it to a file in the current working directory** using the naming convention `<skill-name>-collect-step<N>.sh` (increment N each round, starting from 1; replace `<skill-name>` with this skill's short name, e.g., `sched-bottleneck`). In all cases, provide usage instructions including: (1) how to execute the script, (2) how to save output (e.g., redirect to a results file), (3) ask user to provide the result file for subsequent analysis. Never execute command automatically.
+
+**Data Collection File Conventions**:
+- File path: current working directory
+- File naming: `<skill-short-name>-result-<YYYYMMDD-HHMMSS>.txt` (e.g., `sched-bottleneck-result-20260604-143000.txt`)
+- File format: plain text with `=== Section Name ===` section headers
+- For multiple collection rounds, save each round's output separately with incremented timestamps
+- When referencing prior data, explicitly state the file name and section header
+
+---
+
+## Heavyweight Command Constraints (CRITICAL)
+
+**perf sched record** is a heavyweight command that attaches to target processes and alters runtime behavior. It MUST run sequentially and not concurrently with any other collection or analysis command.
 
 ---
 
 ## Phase 1: Data Collection
 
-**Collection Command**: Run `scripts/collect_sched_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect and analyze scheduling trace data (default 5 seconds, PID optional).
+**Collection Command**: Run `scripts/collect_sched_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect and analyze scheduling trace data (default 10 seconds, PID optional).
+
+**Output**:
+- Prerequisites check (perf_event_paranoid, sched_schedstats)
+- Scheduler configuration (sched_latency_ns, sched_min_granularity_ns, sched_wakeup_granularity_ns, sched_tunable_scaling, sched_migration_cost_ns, sched_autogroup_enabled, sched_child_runs_first, sched_rt_period_us, sched_rt_runtime_us, isolcpus, nohz_full)
+- Run queue status (running, blocked counts)
+- Target process info (PID, name, state, priority, nice, threads, CPU affinity, scheduler policy, RT priority) — if PID specified
+- perf sched latency report (sorted by max/avg delay and by runtime)
+- perf sched timehist output
+- Schedule-out frequency, preemptors, and successors for target process — if PID specified
+- Wakeup latency statistics (avg wait, avg sch_delay, max wait, max delay) — if PID specified
 
 ---
 
@@ -115,6 +138,15 @@ This skill performs scheduling trace analysis using perf tools.
 1. [Recommendation 1]
 2. [Recommendation 2]
 ```
+
+---
+
+## Error Handling
+
+- **perf_event_paranoid restriction**: If perf_event_paranoid > 0, suggest `echo 0 > /proc/sys/kernel/perf_event_paranoid` or running as root; fall back to /proc/sched_debug and vmstat-based analysis if perf is unavailable.
+- **Target process exited**: If --pid is specified but the process has exited, fall back to system-wide scheduling analysis and note the process absence.
+- **perf.data not created**: If perf sched record fails, check disk space and permissions; document the failure and use alternative data sources (top, pidstat, /proc).
+- **sched_schedstats disabled**: Note that scheduler statistics may be incomplete; suggest enabling with `echo 1 > /proc/sys/kernel/sched_schedstats`.
 
 ---
 

@@ -6,7 +6,7 @@
 #
 # Parameters:
 #   --pid      — Target process PID (optional, system-wide if not specified)
-#   --duration — Collection duration in seconds (default: 5)
+#   --duration — Collection duration in seconds (default: 10)
 #
 # Examples:
 #   # System-wide collection for 10 seconds:
@@ -18,7 +18,7 @@
 # Save output to file:
 #   bash collect_sched_metrics.sh --pid 12345 --duration 10 > sched_result.txt 2>&1
 
-DURATION=5
+DURATION=10
 TARGET_PID=""
 
 parse_param() {

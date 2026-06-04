@@ -1,5 +1,16 @@
 # Top-Down Bottleneck Analysis Report
 
+<!-- Phase Mapping: This template corresponds to SKILL.md phases as follows:
+  - "System Environment Static Information" → Phase 1
+  - "Global Resource Bottleneck Identification" + "Top Resource Process Identification" → Phase 2
+  - "Hotspot Function Analysis" + "Syscall Analysis" → Phase 3
+  - "Microarchitecture Bottleneck Analysis" → Phase 4
+  - "Deep-Dive Analysis" → Phase 5
+  - "Bottleneck Analysis Summary" → Phase 6 (Evidence-Based Bottleneck Mapping)
+  - "OS-Level Tuning Recommendations" → Phase 6
+  - Report output → Phase 7
+-->
+
 ## System Environment Static Information
 
 **Hardware Specifications**:
@@ -53,6 +64,8 @@
 
 ## OS-Level Tuning Recommendations
 
+**IMPORTANT SCOPE NOTE**: Primary recommendations MUST focus on OS kernel/subsystem-level tuning (sysctl, scheduler, I/O scheduler, NUMA, IRQ, cgroups, etc.), compiler flags (e.g., `-O3`, `-march=native`, PGO), runtime linkers (e.g., `LD_PRELOAD`). Supplementary recommendations involving application build/deployment settings are provided as **supplementary context only** — they are beyond strict OS-level scope and should be clearly marked as such.
+
 **CPU Bottleneck Tuning Recommendations**:
 | Bottleneck Type | Tuning Recommendation | Expected Effect | Safety Note |
 |-----------------|------------------------|-----------------|-------------|
@@ -60,8 +73,8 @@
 | High %iowait (>20%) | See Disk I/O section below; also check `vm.dirty_ratio` and `vm.dirty_background_ratio` | Reduce CPU blocked on I/O | Monitor disk latency after changes |
 | High %soft (>10%) | Review kernel softirq configuration; check `net.core.netdev_budget`; enable/configure `irqbalance` service | Reduce softirq CPU overhead | Monitor network throughput after changes |
 | High %steal (>10%) | (VM) Not directly tunable inside guest; consider VM host-level CPU quota or CPU pinning adjustment | N/A | N/A |
-| High context switches (>50k/s) | Identify syscall-heavy processes via `strace`; reduce system call frequency at OS level (e.g., check unnecessary `fsync`, `sync_file_range` calls); use compiler-level optimization (`-fno-stack-protector` if stack checks overhead is high) to reduce per-call overhead | Lower scheduler pressure | Monitor scheduling latency after changes |
-| CPU-bound workload with high IPC | Compiler-level: rebuild with `-O3 -march=native -mtune=native` for CPU-specific optimizations; check `-fprofile-use` for PGO | Improve instruction-level parallelism and reduce instruction overhead | PGO requires representative training workload; test in staging |
+| High context switches (>50k/s) | Identify syscall-heavy processes via `strace`; reduce system call frequency at OS level (e.g., check unnecessary `fsync`, `sync_file_range` calls) | Lower scheduler pressure | Monitor scheduling latency after changes |
+| CPU-bound workload with high IPC | *(Supplementary)* Compiler-level: rebuild with `-O3 -march=native -mtune=native` for CPU-specific optimizations; check `-fprofile-use` for PGO | Improve instruction-level parallelism and reduce instruction overhead | PGO requires representative training workload; test in staging |
 
 **Memory Bottleneck Tuning Recommendations**:
 | Bottleneck Type | Tuning Recommendation | Expected Effect | Safety Note |
@@ -70,7 +83,7 @@
 | majflt/s > 1000 | Increase `vm.min_free_kbytes`; check `vm.vfs_cache_pressure` | Reduce major page faults | Monitor memory pressure after changes |
 | Slab > 30% total | Check `/proc/slabinfo` for high-use slabs; tune `vm.memory_balloon` (if enabled) | Free kernel memory for user processes | Monitor kernel stability |
 | NUMA imbalance (remote/local > 2:1) | Enable NUMA balancing via `numactl --interleave=all` or tune `numa_balancing` via `/proc/sys/kernel/numa_balancing` | Reduce remote memory access latency | Not all workloads benefit from interleave |
-| Excessive malloc/free fragmentation | Replace system malloc with jemalloc via `LD_PRELOAD=/usr/lib64/libjemalloc.so.2` or via `/etc/ld.so.preload`; alternatively configure `MALLOC_ARENA_MAX` env var | Reduce memory allocator fragmentation and improve multi-threaded memory performance | Verify jemalloc is compatible with the application; test in staging |
+| Excessive malloc/free fragmentation | *(Supplementary)* Replace system malloc with jemalloc via `LD_PRELOAD=/usr/lib64/libjemalloc.so.2` or via `/etc/ld.so.preload`; alternatively configure `MALLOC_ARENA_MAX` env var | Reduce memory allocator fragmentation and improve multi-threaded memory performance | Verify jemalloc is compatible with the application; test in staging |
 
 **Disk I/O Bottleneck Tuning Recommendations**:
 | Bottleneck Type | Tuning Recommendation | Expected Effect | Safety Note |
@@ -96,7 +109,7 @@
 | Bottleneck Type | Tuning Recommendation | Expected Effect | Safety Note |
 |-----------------|------------------------|-----------------|-------------|
 | L1/LLC cache miss high | Enable transparent hugepages (`always`): `echo always > /sys/kernel/mm/transparent_hugepage/enabled`; or use explicit hugepages via `vm.nr_hugepages` | Reduce memory footprint per access | May cause latency spikes in some workloads; monitor |
-| Branch misprediction high | Compiler-level: rebuild application with `-fbranch-probabilities` and `-fprofile-use` for profile-guided optimization; OS-level: reduce thread count to improve instruction cache | Reduce branch misprediction | Profile-guided optimization requires training workload; test in staging |
+| Branch misprediction high | *(Supplementary)* Compiler-level: rebuild application with `-fbranch-probabilities` and `-fprofile-use` for profile-guided optimization; OS-level: reduce thread count to improve instruction cache | Reduce branch misprediction | Profile-guided optimization requires training workload; test in staging |
 | Frontend stalls high | Reduce number of active processes/threads; tune `kernel.sched_migration_cost_ns` | Reduce instruction fetch stalls | Monitor scheduling latency |
 | Backend stalls high | Memory bandwidth issue: increase `vm.zone_reclaim_mode` (for NUMA); tune `kernel.percpu_cpu_distance` | Reduce memory access latency | May increase local vs remote tradeoffs |
 

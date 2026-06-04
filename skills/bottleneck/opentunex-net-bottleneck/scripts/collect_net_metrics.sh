@@ -2,9 +2,10 @@
 # collect_net_metrics.sh - Collect network metrics for bottleneck analysis
 #
 # Usage:
-#   bash collect_net_metrics.sh [--duration <SECONDS>]
+#   bash collect_net_metrics.sh [--pid <PID>] [--duration <SECONDS>]
 #
 # Parameters:
+#   --pid      — Target process PID for per-process socket statistics (optional)
 #   --duration — Collection duration in seconds (default: 10)
 #
 # Examples:
@@ -14,31 +15,54 @@
 #   # 30-second collection:
 #   bash collect_net_metrics.sh --duration 30
 #
+#   # Target process collection:
+#   bash collect_net_metrics.sh --pid 12345 --duration 30
+#
 # Save output to file:
-#   bash collect_net_metrics.sh --duration 30 > net_result.txt 2>&1
+#   bash collect_net_metrics.sh --pid 12345 --duration 30 > net_result.txt 2>&1
 
 DURATION=10
+TARGET_PID=""
 INTERVAL=1
 
 parse_param() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --pid)
+                TARGET_PID="$2"
+                shift 2
+                ;;
             --duration)
                 DURATION="$2"
                 shift 2
                 ;;
             *)
                 echo "Unknown option: $1" >&2
-                echo "Usage: bash $0 [--duration <SECONDS>]" >&2
+                echo "Usage: bash $0 [--pid <PID>] [--duration <SECONDS>]" >&2
                 exit 1
                 ;;
         esac
     done
+
+    if [ -n "$TARGET_PID" ]; then
+        if ! [[ "$TARGET_PID" =~ ^[0-9]+$ ]]; then
+            echo "Error: --pid must be a numeric value, got: $TARGET_PID" >&2
+            exit 1
+        fi
+
+        if [ ! -d "/proc/$TARGET_PID" ]; then
+            echo "Error: Process with PID $TARGET_PID does not exist" >&2
+            exit 1
+        fi
+    fi
 }
 
 collect_net_metrics() {
     echo "=== Network Metrics Collection ==="
     echo "Duration: $DURATION seconds"
+    if [ -n "$TARGET_PID" ]; then
+        echo "Target PID: $TARGET_PID"
+    fi
     echo ""
 
     echo "=== Network Interfaces ==="
@@ -143,6 +167,24 @@ collect_net_metrics() {
     echo "--- TCP Connection States ---"
     ss -tan 2>/dev/null | awk '{print $1}' | sort | uniq -c | sort -rn | head -10
     echo ""
+
+    if [ -n "$TARGET_PID" ] && [ -d "/proc/$TARGET_PID" ]; then
+        echo "=== Target Process Socket Statistics ==="
+        echo "Process: $(cat /proc/$TARGET_PID/comm 2>/dev/null || echo 'unknown')"
+        echo "--- Open Sockets ---"
+        ss -tanp 2>/dev/null | grep "pid=$TARGET_PID" | head -30
+        echo ""
+        echo "--- Socket State Summary ---"
+        ss -tanp 2>/dev/null | grep "pid=$TARGET_PID" | awk '{print $1}' | sort | uniq -c | sort -rn
+        echo ""
+        echo "--- Socket Memory for PID $TARGET_PID ---"
+        ss -tmp 2>/dev/null | grep "pid=$TARGET_PID" | head -20
+        echo ""
+        echo "--- Process Network Connections Count ---"
+        TOTAL_CONN=$(ss -tanp 2>/dev/null | grep -c "pid=$TARGET_PID" || echo 0)
+        echo "Total TCP connections: $TOTAL_CONN"
+        echo ""
+    fi
 
     echo "=== Collection Complete ==="
 }
