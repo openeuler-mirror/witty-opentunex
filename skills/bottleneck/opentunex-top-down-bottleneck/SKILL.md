@@ -5,12 +5,14 @@ description: Top-down OS-level bottleneck analysis, includes comprehensive syste
 
 # top-down-bottleneck — Top-Down System Bottleneck Analysis
 
-This skill performs a five-phase analysis:
+This skill performs a seven-phase analysis:
 (1) system environment static information analysis;
 (2) global resource bottleneck identification and top resource-consuming process identification;
 (3) hotspot function and syscall analysis for top processes;
 (4) microarchitecture bottleneck analysis using PMU events;
-(5) evidence-based bottleneck analysis with severity mapping.
+(5) deep-dive analysis via specialized skills;
+(6) evidence-based bottleneck mapping;
+(7) output bottleneck analysis report.
 
 **IMPORTANT**: This skill must be triggered FIRST for performance optimization. Phase 5 specialized skills (sched-bottleneck, lock-bottleneck, io-bottleneck, mem-bottleneck, net-bottleneck) should only be invoked based on top-down findings, not independently.
 
@@ -22,9 +24,17 @@ First try to read from user-given data collection files, if data is not enough, 
 
 ## Analysis Command Execution
 
-[1] only if **USER** has specified that remote command execution are allowed, Load the `remote-execution` skill for standardized SSH connection and command execution.
+[1] only if **USER** has specified that remote command execution are allowed, Load the `opentunex-remote-execution` skill for standardized SSH connection and command execution.
 
 [2] otherwise, Keep the following rule for command execution: Always read from user-given data collection files to analyze, command execution results should be saved in these files, if some extra commands are needed for analysis, **prioritize referencing existing scripts under this skill's `scripts/` directory** — provide the script path and usage. Only if no existing script covers the needed commands, generate a new script: output it to **USER** in the conversation, **simultaneously write it to a file in the current working directory** using the naming convention `<skill-name>-collect-step<N>.sh` (increment N each round, starting from 1; replace `<skill-name>` with this skill's short name, e.g., `topdown-bottleneck`). In all cases, provide usage instructions including: (1) how to execute the script, (2) how to save output (e.g., redirect to a results file), (3) ask user to provide the result file for subsequent analysis. Never execute command automatically.
+
+**Data Collection File Conventions**:
+- File path: current working directory
+- File naming: `<skill-short-name>-result-<YYYYMMDD-HHMMSS>.txt` (e.g., `topdown-bottleneck-result-20260604-143000.txt`)
+- File format: plain text with `=== Section Name ===` section headers
+- For multiple collection rounds, save each round's output separately with incremented timestamps
+- When referencing prior data, explicitly state the file name and section header
+- **Inter-phase data passing**: When Phase 2.2 identifies top resource-consuming processes, extract the PID(s) from the output and pass them explicitly via `--pid <PID>` to Phase 3.1, 3.2, and 4 collection scripts. If multiple processes are significant, run each phase per-PID sequentially.
 
 ---
 
@@ -238,7 +248,7 @@ skill:sched-bottleneck
 
 ---
 
-## Phase 6: Evidence-Based Bottleneck Analysis
+## Phase 6: Evidence-Based Bottleneck Mapping
 
 **Requirement**: Every bottleneck claim MUST be backed by specific evidence from Phases 1-5. No vague or speculative statements.
 
@@ -273,8 +283,8 @@ Example evidence chain:
 **Bottleneck prioritization**:
 
 1. **Critical**: Resource saturation (CPU 100%, Disk 100%, Swap in use)
-2. **High**: Excessive latency (I/O await > 100ms, network retrans > 10%)
-3. **Medium**: Performance degradation (cache miss > 30%, branch miss > 10%)
+2. **High**: Excessive latency (I/O await > 100ms, network retrans > 10%, scheduling max delay > 100ms)
+3. **Medium**: Performance degradation (cache miss > 30%, branch miss > 10%, Slab > 30%)
 4. **Low**: Suboptimal but not blocking (context switches elevated but acceptable)
 
 ---
@@ -283,7 +293,17 @@ Example evidence chain:
 
 Summarize all other phases findings, and output analysis report, also save as `opentunex-bottleneck-analysis-report-<APP>-<BENCHMARK>-<DATE>.md` in current working directory.
 
-read [references/bottleneck-analysis-report-template.md] for report templete.
+Read `references/bottleneck-analysis-report-template.md` (located under this skill's directory) for report template.
+
+---
+
+## Error Handling
+
+- **Script execution failure**: If any phase script fails, document the failure, skip the affected analysis, and continue with remaining phases. Note the data gap in the final report.
+- **perf_event_paranoid restriction**: If perf_event_paranoid > 0, suggest `echo 0 > /proc/sys/kernel/perf_event_paranoid` or running as root; fall back to /proc and sysfs-based analysis for affected phases.
+- **Target process exited mid-analysis**: If the target PID becomes unavailable, fall back to system-wide analysis for remaining phases and note the process absence.
+- **Insufficient permissions**: For scripts requiring root (e.g., /proc/slabinfo, lock_stat, some perf events), document missing data and suggest elevated privileges; proceed with available data.
+- **Tool not installed**: If perf, sar, or other required tools are missing, document the limitation and use alternative data sources where possible (e.g., /proc, /sys).
 
 ---
 
@@ -292,5 +312,5 @@ read [references/bottleneck-analysis-report-template.md] for report templete.
 - **basic principle**: All analysis must be specific and evidence-based; maintain rigor and professionalism.
 - **Iteration**: If evidence is insufficient, narrow focus (e.g., container/port/device) and deepen analysis; reuse existing data if system state unchanged; Phase 5 deep-dive is required for Critical/High severity.
 - **Completion**: All phases must be fully executed before bottleneck analysis report output; Evidence-Based bottleneck analysis should only stop when evidence is complete and not guessing. All phases result should be included in final report.
-- **Scope Constraint**: This skill analyzes **ONLY OS-LEVEL** bottlenecks. Do NOT collect, interpret, or provide recommendations based on application-layer data (e.g., MySQL query plans, PostgreSQL EXPLAIN output, Java heap/Garbage Collection logs, Redis command traces, application configuration files, application business logic). If application-layer issues are detected (e.g., a process spending excessive time in application code), describe it at the OS level (e.g., "process spending 80% CPU time in user space") without diving into application internals.
+- **Scope Constraint**: This skill analyzes **ONLY OS-LEVEL** bottlenecks(kernel/system config, compiler flags, runtime linker). Do NOT collect, interpret, or provide recommendations based on application-layer data (e.g., MySQL query plans, PostgreSQL EXPLAIN output, Java heap/Garbage Collection logs, Redis command traces, application configuration files, application business logic). If application-layer issues are detected (e.g., a process spending excessive time in application code), describe it at the OS level (e.g., "process spending 80% CPU time in user space") without diving into application internals.
 - **Operation Constraint**: This skill only do analysis operations with no side effect for target machine, changing system configuration or covering application data are **NOT ALLOWED**.

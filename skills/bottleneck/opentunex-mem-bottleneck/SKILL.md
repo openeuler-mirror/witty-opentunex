@@ -11,15 +11,45 @@ This skill performs OS-level memory performance bottleneck analysis, including m
 
 ## Analysis Command Execution
 
-[1] only if **USER** has specified that remote command execution are allowed, Load the `remote-execution` skill for standardized SSH connection and command execution.
+[1] only if **USER** has specified that remote command execution are allowed, Load the `opentunex-remote-execution` skill for standardized SSH connection and command execution.
 
 [2] otherwise, Keep the following rule for command execution: Always read from user-given data collection files to analyze, command execution results should be saved in these files, if some extra commands are needed for analysis, **prioritize referencing existing scripts under this skill's `scripts/` directory** — provide the script path and usage. Only if no existing script covers the needed commands, generate a new script: output it to **USER** in the conversation, **simultaneously write it to a file in the current working directory** using the naming convention `<skill-name>-collect-step<N>.sh` (increment N each round, starting from 1; replace `<skill-name>` with this skill's short name, e.g., `mem-bottleneck`). In all cases, provide usage instructions including: (1) how to execute the script, (2) how to save output (e.g., redirect to a results file), (3) ask user to provide the result file for subsequent analysis. Never execute command automatically.
+
+**Data Collection File Conventions**:
+- File path: current working directory
+- File naming: `<skill-short-name>-result-<YYYYMMDD-HHMMSS>.txt` (e.g., `mem-bottleneck-result-20260604-143000.txt`)
+- File format: plain text with `=== Section Name ===` section headers
+- For multiple collection rounds, save each round's output separately with incremented timestamps
+- When referencing prior data, explicitly state the file name and section header
 
 ---
 
 ## Phase 1: Data Collection
 
-**Collection Command**: Run `scripts/collect_mem_metrics.sh --pid [PID] [--duration <SECONDS>]` to collect memory metrics.
+**Collection Command**: Run `scripts/collect_mem_metrics.sh --pid [PID]` to collect memory metrics (PID optional).
+
+**Output**:
+- System overview (kernel version, CPU count, total memory)
+- Memory Pressure (PSI: some avg10/avg60/avg300, full avg10/avg60/avg300)
+- Memory usage (free -h output)
+- VM OOM stats (oom_kill, pgmajfault counters)
+- Swap configuration (swapon -s)
+- Slab info (top 30 entries from /proc/slabinfo)
+- Vmalloc region (VmallocTotal, VmallocUsed)
+- Memory allocation/reclaim stats (pgfault, pgmajflt, pgalloc, pgfree, pgscank, pgscand, pgsteal, pgrotated)
+- Memory details (Active, Inactive, SReclaimable, SUnreclaim, Shmem, VmallocUsed, Committed_AS)
+- HugePages configuration (nr_hugepages, HugePages_Total/Free/Rsvd, Hugepagesize, transparent_hugepage)
+- OOM configuration (oom_kill_allocating_task, oom_dump_tasks)
+- KSM configuration (ksm.run, pages_shared, pages_sharing)
+- NUMA balancing setting
+- Memory CGroup limits (limit_in_bytes, soft_limit, usage)
+- Memory watermarks (watermark_scale_factor, watermark_boost_factor)
+- Memory zone info per NUMA node
+- jemalloc configuration (MALLOC_ARENA_MAX, MALLOC_CONF, detection in target process)
+- NUMA statistics (system-wide numa_hit/miss/foreign/local/other)
+- Process NUMA memory distribution and cross-NUMA warning — if PID specified
+- NUMA node layout (numactl --hardware, numactl --show)
+- Recent OOM events (dmesg/journalctl)
 
 ---
 
@@ -93,6 +123,15 @@ This skill performs OS-level memory performance bottleneck analysis, including m
 1. [Recommendation 1]
 2. [Recommendation 2]
 ```
+
+---
+
+## Error Handling
+
+- **/proc/slabinfo not readable**: Requires root; if access is denied, fall back to Slab/SReclaimable/SUnreclaim from /proc/meminfo and note the limitation.
+- **numactl/numastat not available**: Skip per-NUMA-node analysis; document missing data and suggest installing numactl package.
+- **Target process exited**: If --pid is specified but the process has exited, fall back to system-wide memory analysis and note the process absence.
+- **PSI not available**: If /proc/pressure/mem is missing, fall back to vmstat (si/so) and /proc/vmstat counters for memory pressure indication.
 
 ---
 
