@@ -79,6 +79,8 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 **Output**: Top processes consuming cpu/mem/io resource.
 
+Top processes should be consistent with benchmark target application. And in following phases, `PID` refers to the PID of Top process detected in this phase.
+
 ---
 
 ## Phase 3: Hotspot Function and Syscall Analysis
@@ -87,7 +89,7 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 ### Step 3.1: Hotspot Function Analysis
 
-**Collection Command**: Run `scripts/phase3.1-hotspot-function.sh --pid <PID> [--duration <SECONDS>]` to collect hotspot function data.
+**Collection Command**: Run `scripts/phase3.1-hotspot-function.sh --pid <PID>` to collect hotspot function data.
 
 **Key Metrics to Analyze**:
 
@@ -104,7 +106,7 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 ### Step 3.2: Syscall Analysis
 
-**Collection Command**: Run `scripts/phase3.2-syscall-analysis.sh --pid <PID> [--duration <SECONDS>]` to collect syscall data. Must run AFTER Phase 3.1 completes.
+**Collection Command**: Run `scripts/phase3.2-syscall-analysis.sh --pid <PID>` to collect syscall data. Must run AFTER Phase 3.1 completes.
 
 **Key Metrics to Analyze**:
 
@@ -121,7 +123,7 @@ From Step 2.1, identify top resource-consuming processes and perform detailed OS
 
 ## Phase 4: Microarchitecture Bottleneck Analysis
 
-**Collection Command**: Run `scripts/phase4-microarch.sh --pid <PID> [--duration <SECONDS>]` to collect microarchitecture PMU data. Must run AFTER Phase 3 completes.
+**Collection Command**: Run `scripts/phase4-microarch.sh --pid <PID>` to collect microarchitecture PMU data. Must run AFTER Phase 3 completes.
 
 Use PMU (Performance Monitoring Unit) events to identify cache, branch, and pipeline bottlenecks:
 
@@ -277,9 +279,11 @@ Example evidence chain:
 
 ---
 
-## Output Template
+## Phase 7: Output Bottleneck Analysis Report
 
-reference:output-template
+Summarize all other phases findings, and output analysis report, also save as `opentunex-bottleneck-analysis-report-<APP>-<BENCHMARK>-<DATE>.md` in current working directory.
+
+read [references/bottleneck-analysis-report-template.md] for report templete.
 
 ---
 
@@ -287,5 +291,6 @@ reference:output-template
 
 - **basic principle**: All analysis must be specific and evidence-based; maintain rigor and professionalism.
 - **Iteration**: If evidence is insufficient, narrow focus (e.g., container/port/device) and deepen analysis; reuse existing data if system state unchanged; Phase 5 deep-dive is required for Critical/High severity.
-- **Completion**: All phases must be fully executed before concluding; stop only when evidence is complete and user confirms. All phases result should be included in analysis summary.
-- **Scope Constraint — OS Level Only**: This skill analyzes ONLY OS-level information and bottlenecks. Do NOT collect, interpret, or provide recommendations based on application-layer data (e.g., MySQL query plans, PostgreSQL EXPLAIN output, Java heap/Garbage Collection logs, Redis command traces, application configuration files, application business logic). If application-layer issues are detected (e.g., a process spending excessive time in application code), describe it at the OS level (e.g., "process spending 80% CPU time in user space") without diving into application internals.
+- **Completion**: All phases must be fully executed before bottleneck analysis report output; Evidence-Based bottleneck analysis should only stop when evidence is complete and not guessing. All phases result should be included in final report.
+- **Scope Constraint**: This skill analyzes **ONLY OS-LEVEL** bottlenecks. Do NOT collect, interpret, or provide recommendations based on application-layer data (e.g., MySQL query plans, PostgreSQL EXPLAIN output, Java heap/Garbage Collection logs, Redis command traces, application configuration files, application business logic). If application-layer issues are detected (e.g., a process spending excessive time in application code), describe it at the OS level (e.g., "process spending 80% CPU time in user space") without diving into application internals.
+- **Operation Constraint**: This skill only do analysis operations with no side effect for target machine, changing system configuration or covering application data are **NOT ALLOWED**.
