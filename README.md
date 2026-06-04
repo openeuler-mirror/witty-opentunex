@@ -52,12 +52,15 @@ opencode安装&使用参考文档：https://opencode.ai/docs/zh-cn/
 ```sh
 mkdir -p ~/.config/opencode/skills/
 
-# 安装所有skills（跳过分类目录）
+# 清理skill不必要文件
+rm -f skills/*/*/DESIGN.md skills/*/*/README.md
+
+# 安装所有skills
 for skill in skills/*/*/; do
     cp -r "$skill" ~/.config/opencode/skills/
 done
 
-# 仅安装OS层瓶颈分析：
+# 仅安装OS层瓶颈分析skills：
 cp -r skills/auxiliary/opentunex-remote-execution ~/.config/opencode/skills/
 cp -r skills/bottleneck/opentunex-{top-down,sched,lock,io,mem,net}-bottleneck ~/.config/opencode/skills/
 ```
