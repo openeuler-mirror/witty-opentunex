@@ -246,6 +246,8 @@ skill:sched-bottleneck
 # - perf sched event analysis
 ```
 
+Each specified skill invoked should analyze the key process `PID` found in previous phases.
+
 ---
 
 ## Phase 6: Evidence-Based Bottleneck Mapping
