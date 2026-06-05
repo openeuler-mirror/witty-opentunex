@@ -117,8 +117,6 @@ collect_microarch() {
 
     echo "--- SCCL DRAM Access (15s, tolerate if unavailable) ---"
     perf stat -e remote_access,ll_cache,ll_cache_miss -p "$PID" -- sleep "$DURATION" || echo "(remote_access/ll_cache/ll_cache_miss not available on this platform)"
-    echo "Cross-SCCL ratio ≈ remote_access / (remote_access + ll_cache) * 100%"
-
 
     echo ""
     echo "============================================================"
