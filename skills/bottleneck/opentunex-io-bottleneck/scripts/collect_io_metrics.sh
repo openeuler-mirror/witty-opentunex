@@ -26,10 +26,20 @@ parse_param() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --pid)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --pid requires a value" >&2
+                    echo "Usage: bash $0 [--pid <PID>] [--duration <SECONDS>]" >&2
+                    exit 1
+                fi
                 TARGET_PID="$2"
                 shift 2
                 ;;
             --duration)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --duration requires a value" >&2
+                    echo "Usage: bash $0 [--pid <PID>] [--duration <SECONDS>]" >&2
+                    exit 1
+                fi
                 DURATION="$2"
                 shift 2
                 ;;
@@ -51,6 +61,11 @@ parse_param() {
             echo "Error: Process with PID $TARGET_PID does not exist" >&2
             exit 1
         fi
+    fi
+
+    if ! [[ "$DURATION" =~ ^[0-9]+$ ]] || [ "$DURATION" -le 0 ]; then
+        echo "Error: --duration must be a positive integer, got: $DURATION" >&2
+        exit 1
     fi
 }
 
@@ -75,15 +90,15 @@ collect_io_metrics() {
     echo "=== I/O Scheduler Configuration ==="
     for dev in $(lsblk -d -n -o NAME | grep -E '^vd|^sd|^nvme' | head -5); do
         echo "--- /dev/$dev ---"
-        echo "scheduler: $(cat /sys/block/$dev/queue/scheduler 2>/dev/null | grep -o '\[.*\]' || echo 'N/A')"
-        echo "nr_requests: $(cat /sys/block/$dev/queue/nr_requests 2>/dev/null || echo 'N/A')"
-        echo "read_ahead_kb: $(cat /sys/block/$dev/queue/read_ahead_kb 2>/dev/null || echo 'N/A')"
-        echo "max_sectors_kb: $(cat /sys/block/$dev/queue/max_sectors_kb 2>/dev/null || echo 'N/A')"
-        echo "timeout: $(cat /sys/block/$dev/queue/timeout 2>/dev/null || echo 'N/A')"
-        echo "rotational: $(cat /sys/block/$dev/queue/rotational 2>/dev/null || echo 'N/A')"
-        echo "add_random: $(cat /sys/block/$dev/queue/add_random 2>/dev/null || echo 'N/A')"
-        echo "rq_affinity: $(cat /sys/block/$dev/queue/rq_affinity 2>/dev/null || echo 'N/A')"
-        echo "nomerges: $(cat /sys/block/$dev/queue/nomerges 2>/dev/null || echo 'N/A')"
+        echo "scheduler: $(cat "/sys/block/$dev/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' || echo 'N/A')"
+        echo "nr_requests: $(cat "/sys/block/$dev/queue/nr_requests" 2>/dev/null || echo 'N/A')"
+        echo "read_ahead_kb: $(cat "/sys/block/$dev/queue/read_ahead_kb" 2>/dev/null || echo 'N/A')"
+        echo "max_sectors_kb: $(cat "/sys/block/$dev/queue/max_sectors_kb" 2>/dev/null || echo 'N/A')"
+        echo "timeout: $(cat "/sys/block/$dev/queue/timeout" 2>/dev/null || echo 'N/A')"
+        echo "rotational: $(cat "/sys/block/$dev/queue/rotational" 2>/dev/null || echo 'N/A')"
+        echo "add_random: $(cat "/sys/block/$dev/queue/add_random" 2>/dev/null || echo 'N/A')"
+        echo "rq_affinity: $(cat "/sys/block/$dev/queue/rq_affinity" 2>/dev/null || echo 'N/A')"
+        echo "nomerges: $(cat "/sys/block/$dev/queue/nomerges" 2>/dev/null || echo 'N/A')"
         echo ""
     done
 
@@ -105,11 +120,11 @@ collect_io_metrics() {
         echo "=== Process I/O Configuration (PID $TARGET_PID) ==="
 
         echo "--- IO Priority ---"
-        ionice -p $TARGET_PID 2>/dev/null || echo "  ionice not available"
+        ionice -p "$TARGET_PID" 2>/dev/null || echo "  ionice not available"
 
         echo "--- IO Statistics ---"
-        if [ -f /proc/$TARGET_PID/io ]; then
-            cat /proc/$TARGET_PID/io | while IFS=: read key val; do
+        if [ -f "/proc/$TARGET_PID/io" ]; then
+            cat "/proc/$TARGET_PID/io" | while IFS=: read key val; do
                 printf "  %-25s %s\n" "$key" "${val# }"
             done
         else
@@ -117,15 +132,15 @@ collect_io_metrics() {
         fi
 
         echo "--- Open Files Limit ---"
-        soft=$(awk '/Max open files/ {print $4}' /proc/$TARGET_PID/limits)
-        hard=$(awk '/Max open files/ {print $5}' /proc/$TARGET_PID/limits)
+        soft=$(awk '/Max open files/ {print $4}' "/proc/$TARGET_PID/limits")
+        hard=$(awk '/Max open files/ {print $5}' "/proc/$TARGET_PID/limits")
         echo "  soft=$soft  hard=$hard"
 
-        fd_count=$(ls /proc/$TARGET_PID/fd/ 2>/dev/null | wc -l)
+        fd_count=$(ls "/proc/$TARGET_PID/fd/" 2>/dev/null | wc -l)
         [ "$fd_count" -gt 0 ] && echo "  open_fds=$fd_count"
 
         echo "--- cgroup IO Throttling ---"
-        cg_path=$(awk -F: '/blkio/ {print $3}' /proc/$TARGET_PID/cgroup 2>/dev/null)
+        cg_path=$(awk -F: '/blkio/ {print $3}' "/proc/$TARGET_PID/cgroup" 2>/dev/null)
         if [ -n "$cg_path" ]; then
             cg_base="/sys/fs/cgroup/blkio${cg_path}"
             cg_base=$(echo "$cg_base" | sed 's#//#/#')
@@ -206,7 +221,7 @@ collect_io_metrics() {
     for fs in $(mount | grep 'type ext4' | awk '{print $1}' | head -5); do
         echo "--- $fs ---"
         if command -v tune2fs &> /dev/null; then
-            journal_info=$(tune2fs -l $fs 2>/dev/null | grep -iE '^Journal|^Commit' || true)
+            journal_info=$(tune2fs -l "$fs" 2>/dev/null | grep -iE '^Journal|^Commit' || true)
             if [ -n "$journal_info" ]; then
                 echo "$journal_info"
             else
@@ -225,7 +240,7 @@ collect_io_metrics() {
         echo "--- /dev/$dev ---"
         found=0
 
-        for irq_dir in /sys/block/$dev/device/msi_irqs /sys/block/$dev/device/../msi_irqs /sys/block/$dev/device/../../msi_irqs; do
+        for irq_dir in "/sys/block/$dev/device/msi_irqs" "/sys/block/$dev/device/../msi_irqs" "/sys/block/$dev/device/../../msi_irqs"; do
             [ ! -d "$irq_dir" ] && continue
             count=0
             for irq_file in "$irq_dir"/*; do
@@ -244,7 +259,7 @@ collect_io_metrics() {
 
         if [ $found -eq 0 ]; then
             pci_bdf=""
-            path=$(readlink -f /sys/block/$dev/device 2>/dev/null)
+            path=$(readlink -f "/sys/block/$dev/device" 2>/dev/null)
             while [ "$path" != "/" ] && [ "$path" != "." ] && [ -z "$pci_bdf" ]; do
                 if echo "$(basename "$path")" | grep -qE '^0000:'; then
                     pci_bdf="$path"
@@ -275,7 +290,7 @@ collect_io_metrics() {
         fi
 
         if [ $found -eq 0 ]; then
-            driver_path=$(readlink -f /sys/block/$dev/device/driver 2>/dev/null)
+            driver_path=$(readlink -f "/sys/block/$dev/device/driver" 2>/dev/null)
             if [ -n "$driver_path" ]; then
                 drv=$(basename "$driver_path")
                 grep -i "$drv" /proc/interrupts 2>/dev/null | head -8 | while read line; do
@@ -295,12 +310,12 @@ collect_io_metrics() {
 
     echo "=== blk-mq Configuration ==="
     for dev in $(lsblk -d -n -o NAME | grep -E '^vd|^sd|^nvme' | head -5); do
-        if [ -d /sys/block/$dev/mq ]; then
+        if [ -d "/sys/block/$dev/mq" ]; then
             echo "--- /dev/$dev ---"
-            echo "mq_queues: $(ls /sys/block/$dev/mq/ 2>/dev/null | wc -w)"
-            nr_tags=$(cat /sys/block/$dev/mq/0/nr_reserved_tags 2>/dev/null)
+            echo "mq_queues: $(ls "/sys/block/$dev/mq/" 2>/dev/null | wc -w)"
+            nr_tags=$(cat "/sys/block/$dev/mq/0/nr_reserved_tags" 2>/dev/null)
             [ -n "$nr_tags" ] && echo "nr_reserved_tags: $nr_tags"
-            numa=$(cat /sys/block/$dev/device/numa_node 2>/dev/null)
+            numa=$(cat "/sys/block/$dev/device/numa_node" 2>/dev/null)
             [ -n "$numa" ] && echo "numa_node: $numa"
         fi
     done
@@ -354,11 +369,11 @@ collect_io_metrics() {
 
     echo "=== Starting Background Collection (${DURATION}s) ==="
 
-    vmstat $INTERVAL $DURATION > /tmp/vmstat_output.txt &
+    vmstat "$INTERVAL" "$DURATION" > /tmp/vmstat_output.txt &
     VMSTAT_PID=$!
 
     if command -v iostat &> /dev/null; then
-        iostat -x $INTERVAL $DURATION > /tmp/iostat_output.txt 2>&1 &
+        iostat -x "$INTERVAL" "$DURATION" > /tmp/iostat_output.txt 2>&1 &
         IOSTAT_PID=$!
     else
         echo "iostat not available" > /tmp/iostat_output.txt
@@ -366,12 +381,12 @@ collect_io_metrics() {
     fi
 
     if command -v pidstat &> /dev/null; then
-        pidstat -d $INTERVAL $DURATION > /tmp/pidstat_d_output.txt 2>&1 &
+        pidstat -d "$INTERVAL" "$DURATION" > /tmp/pidstat_d_output.txt 2>&1 &
         PIDSTAT_PID=$!
     fi
 
     if command -v mpstat &> /dev/null; then
-        mpstat -P ALL $INTERVAL $DURATION > /tmp/mpstat_output.txt 2>&1 &
+        mpstat -P ALL "$INTERVAL" "$DURATION" > /tmp/mpstat_output.txt 2>&1 &
         MPSTAT_PID=$!
     fi
 
@@ -447,4 +462,5 @@ collect_io_metrics() {
 }
 
 parse_param "$@"
+trap 'rm -f /tmp/vmstat_output.txt /tmp/iostat_output.txt /tmp/pidstat_d_output.txt /tmp/mpstat_output.txt 2>/dev/null; jobs -p | xargs -r kill 2>/dev/null' EXIT INT TERM
 collect_io_metrics

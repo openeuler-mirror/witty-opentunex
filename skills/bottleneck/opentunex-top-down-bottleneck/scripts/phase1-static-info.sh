@@ -79,11 +79,23 @@ collect_static_info() {
 
     echo ""
     echo "--- libgcc Version ---"
-    rpm -qa libgcc 2>/dev/null | head -1 || true
+    if command -v rpm >/dev/null 2>&1; then
+        rpm -qa libgcc 2>/dev/null | head -1 || true
+    elif command -v dpkg >/dev/null 2>&1; then
+        dpkg -l libgcc 2>/dev/null | awk '/^ii/ {print $2, $3}' || true
+    else
+        echo "(package manager not found)"
+    fi
 
     echo ""
     echo "--- glibc Version ---"
-    rpm -qa glibc 2>/dev/null | head -1 || true
+    if command -v rpm >/dev/null 2>&1; then
+        rpm -qa glibc 2>/dev/null | head -1 || true
+    elif command -v dpkg >/dev/null 2>&1; then
+        dpkg -l libc6 2>/dev/null | awk '/^ii/ {print $2, $3}' || true
+    else
+        ldd --version 2>&1 | head -1 || echo "(glibc version not detectable)"
+    fi
 
     echo ""
     echo "========== Kernel Boot Parameters =========="
@@ -113,7 +125,7 @@ collect_static_info() {
 
     echo ""
     echo "--- Kernel Tickless / nohz / Preempt Config ---"
-    cat /boot/config-$(uname -r) 2>/dev/null | grep -E "NO_HZ|HZ_1000|PREEMPT" || true
+    cat "/boot/config-$(uname -r)" 2>/dev/null | grep -E "NO_HZ|HZ_1000|PREEMPT" || true
 
     echo ""
     echo "--- Transparent Hugepage Status ---"
@@ -122,8 +134,8 @@ collect_static_info() {
     echo ""
     echo "--- I/O Scheduler per Block Device ---"
     for dev in $(ls /sys/block/); do
-        if [ -f /sys/block/$dev/queue/scheduler ]; then
-            echo "$dev: $(cat /sys/block/$dev/queue/scheduler 2>/dev/null)"
+        if [ -f "/sys/block/$dev/queue/scheduler" ]; then
+            echo "$dev: $(cat "/sys/block/$dev/queue/scheduler" 2>/dev/null)"
         else
             echo "$dev: (no scheduler file, e.g. dm device)"
         fi
@@ -139,5 +151,4 @@ collect_static_info() {
     echo "============================================================"
 }
 
-parse_param "$@"
 collect_static_info

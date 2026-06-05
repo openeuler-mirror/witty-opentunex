@@ -33,10 +33,20 @@ parse_param() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --pid)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --pid requires a value" >&2
+                    echo "Usage: bash $0 --pid <PID> [--duration <SECONDS>]" >&2
+                    exit 1
+                fi
                 PID="$2"
                 shift 2
                 ;;
             --duration)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --duration requires a value" >&2
+                    echo "Usage: bash $0 --pid <PID> [--duration <SECONDS>]" >&2
+                    exit 1
+                fi
                 DURATION="$2"
                 shift 2
                 ;;
@@ -63,6 +73,11 @@ parse_param() {
         echo "Error: Process with PID $PID does not exist" >&2
         exit 1
     fi
+
+    if ! [[ "$DURATION" =~ ^[0-9]+$ ]] || [ "$DURATION" -le 0 ]; then
+        echo "Error: --duration must be a positive integer, got: $DURATION" >&2
+        exit 1
+    fi
 }
 
 collect_microarch() {
@@ -71,16 +86,31 @@ collect_microarch() {
     echo "============================================================"
     echo ""
 
+    if [ ! -d "/proc/$PID" ]; then
+        echo "Error: PID $PID has exited before data collection" >&2
+        return 1
+    fi
+
     echo "========== CPU Cache and TLB Analysis =========="
 
     echo "--- Cache Miss Rates and TLB Miss Statistics (15s) ---"
-    perf stat -e L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses,dTLB-loads,dTLB-load-misses,iTLB-loads,iTLB-load-misses -p "$PID" -- sleep "$DURATION" || true
+    perf stat -e L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses,dTLB-loads,dTLB-load-misses,iTLB-loads,iTLB-load-misses -p "$PID" -- sleep "$DURATION" || echo "(Cache/TLB event collection failed or partially unavailable)"
+
+    if [ ! -d "/proc/$PID" ]; then
+        echo "Warning: PID $PID has exited, skipping remaining collections" >&2
+        return 1
+    fi
 
     echo ""
     echo "========== Pipeline Stall and Branch Prediction Analysis =========="
 
     echo "--- Pipeline Stall, Branch Prediction and Top-Down Analysis (15s) ---"
-    perf stat -e stalled-cycles-frontend,stalled-cycles-backend,branches,branch-misses,cycles,instructions -p "$PID" -- sleep "$DURATION"
+    perf stat -e stalled-cycles-frontend,stalled-cycles-backend,branches,branch-misses,cycles,instructions -p "$PID" -- sleep "$DURATION" || echo "(Pipeline/Branch event collection failed or partially unavailable)"
+
+    if [ ! -d "/proc/$PID" ]; then
+        echo "Warning: PID $PID has exited, skipping remaining collections" >&2
+        return 1
+    fi
 
     echo ""
     echo "========== Cross-SCCL NUMA Analysis (ARM only) =========="
@@ -97,4 +127,5 @@ collect_microarch() {
 }
 
 parse_param "$@"
+trap 'jobs -p | xargs -r kill 2>/dev/null' EXIT INT TERM
 collect_microarch

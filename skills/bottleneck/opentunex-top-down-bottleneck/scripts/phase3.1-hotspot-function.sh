@@ -32,10 +32,20 @@ parse_param() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --pid)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --pid requires a value" >&2
+                    echo "Usage: bash $0 --pid <PID> [--duration <SECONDS>]" >&2
+                    exit 1
+                fi
                 PID="$2"
                 shift 2
                 ;;
             --duration)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --duration requires a value" >&2
+                    echo "Usage: bash $0 --pid <PID> [--duration <SECONDS>]" >&2
+                    exit 1
+                fi
                 DURATION="$2"
                 shift 2
                 ;;
@@ -62,6 +72,11 @@ parse_param() {
         echo "Error: Process with PID $PID does not exist" >&2
         exit 1
     fi
+
+    if ! [[ "$DURATION" =~ ^[0-9]+$ ]] || [ "$DURATION" -le 0 ]; then
+        echo "Error: --duration must be a positive integer, got: $DURATION" >&2
+        exit 1
+    fi
 }
 
 collect_hotspot_function() {
@@ -70,12 +85,25 @@ collect_hotspot_function() {
     echo "============================================================"
     echo ""
 
+    if [ ! -d "/proc/$PID" ]; then
+        echo "Error: PID $PID has exited before data collection" >&2
+        return 1
+    fi
+
     echo "--- perf record (99Hz, ${DURATION}s sampling) ---"
-    perf record -F 99 -p "$PID" -g -o /tmp/perf_phase3_1.data -- sleep "$DURATION"
+    perf record -F 99 -p "$PID" -g -o /tmp/perf_phase3_1.data -- sleep "$DURATION" || {
+        echo "Warning: perf record failed (PID may have exited)" >&2
+    rm -f /tmp/perf_phase3_1.data /tmp/flamegraph_phase3_1.svg 2>/dev/null
+        return 1
+    }
 
     echo ""
     echo "--- perf report ---"
-    PAGER=cat perf report -i /tmp/perf_phase3_1.data --stdio --percent-limit 1
+    if [ -f /tmp/perf_phase3_1.data ] && [ -s /tmp/perf_phase3_1.data ]; then
+        PAGER=cat perf report -i /tmp/perf_phase3_1.data --stdio --percent-limit 1
+    else
+        echo "(perf data file missing or empty, skipping report)"
+    fi
 
     echo ""
     echo "--- Generating flamegraph ---"
@@ -99,4 +127,5 @@ collect_hotspot_function() {
 }
 
 parse_param "$@"
+trap 'rm -f /tmp/perf_phase3_1.data /tmp/flamegraph_phase3_1.svg 2>/dev/null' EXIT INT TERM
 collect_hotspot_function

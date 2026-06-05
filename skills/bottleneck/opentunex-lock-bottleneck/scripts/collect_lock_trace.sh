@@ -25,10 +25,20 @@ parse_param() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --pid)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --pid requires a value" >&2
+                    echo "Usage: bash $0 [--pid <PID>] [--duration <SECONDS>]" >&2
+                    exit 1
+                fi
                 TARGET_PID="$2"
                 shift 2
                 ;;
             --duration)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --duration requires a value" >&2
+                    echo "Usage: bash $0 [--pid <PID>] [--duration <SECONDS>]" >&2
+                    exit 1
+                fi
                 DURATION="$2"
                 shift 2
                 ;;
@@ -50,6 +60,11 @@ parse_param() {
             echo "Error: Process with PID $TARGET_PID does not exist" >&2
             exit 1
         fi
+    fi
+
+    if ! [[ "$DURATION" =~ ^[0-9]+$ ]] || [ "$DURATION" -le 0 ]; then
+        echo "Error: --duration must be a positive integer, got: $DURATION" >&2
+        exit 1
     fi
 }
 
@@ -112,10 +127,10 @@ collect_lock_trace() {
 
     if [ -n "$TARGET_PID" ] && [ -d "/proc/$TARGET_PID" ]; then
         echo "=== Target Process Info (PID: $TARGET_PID) ==="
-        ps -T -p $TARGET_PID 2>/dev/null || echo "Process not found"
-        cat /proc/$TARGET_PID/status 2>/dev/null | grep -E "State|Threads|VmRSS" || echo "Cannot read process"
-        echo "wchan: $(cat /proc/$TARGET_PID/wchan 2>/dev/null || echo 'N/A')"
-        cat /proc/$TARGET_PID/stack 2>/dev/null | head -20 || echo "Cannot read stack"
+        ps -T -p "$TARGET_PID" 2>/dev/null || echo "Process not found"
+        cat "/proc/$TARGET_PID/status" 2>/dev/null | grep -E "State|Threads|VmRSS" || echo "Cannot read process"
+        echo "wchan: $(cat "/proc/$TARGET_PID/wchan" 2>/dev/null || echo 'N/A')"
+        cat "/proc/$TARGET_PID/stack" 2>/dev/null | head -20 || echo "Cannot read stack"
         echo ""
     fi
 
