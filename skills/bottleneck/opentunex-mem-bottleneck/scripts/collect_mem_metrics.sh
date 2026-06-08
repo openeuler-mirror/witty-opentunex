@@ -23,6 +23,11 @@ parse_param() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --pid)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --pid requires a value" >&2
+                    echo "Usage: bash $0 [--pid <PID>]" >&2
+                    exit 1
+                fi
                 TARGET_PID="$2"
                 shift 2
                 ;;
@@ -158,8 +163,8 @@ collect_mem_metrics() {
     echo "=== jemalloc Configuration ==="
     jemalloc_in_use=0
 
-    if [ -n "$TARGET_PID" ] && [ -f /proc/$TARGET_PID/maps ]; then
-        jemap=$(grep -i jemalloc /proc/$TARGET_PID/maps 2>/dev/null | head -1)
+    if [ -n "$TARGET_PID" ] && [ -f "/proc/$TARGET_PID/maps" ]; then
+        jemap=$(grep -i jemalloc "/proc/$TARGET_PID/maps" 2>/dev/null | head -1)
         if [ -n "$jemap" ]; then
             echo "jemalloc detected in target process:"
             echo "$jemap"
@@ -184,7 +189,7 @@ collect_mem_metrics() {
         for key in background_thread dirty_decay_ms muzzy_decay_ms narenas percpu_arena \
                    oversize_threshold metadata_thp lg_extent_max_active_fit \
                    tcache lg_tcache_max prof prof_active stats_print; do
-            val=$(echo "$MALLOC_CONF" | grep -oP "${key}:\K[^,]+")
+            val=$(echo "$MALLOC_CONF" | sed -n "s/.*${key}:\([^,]*\).*/\1/p")
             if [ -n "$val" ]; then
                 echo "  $key=$val"
             fi
@@ -199,23 +204,24 @@ collect_mem_metrics() {
     if [ -n "$TARGET_PID" ] && [ -d "/proc/$TARGET_PID" ]; then
         echo "=== Process NUMA Memory Distribution ==="
         if command -v numastat &> /dev/null; then
-            numastat -p $TARGET_PID
-        elif [ -f /proc/$TARGET_PID/numa_maps ]; then
+            numastat -p "$TARGET_PID"
+        elif [ -f "/proc/$TARGET_PID/numa_maps" ]; then
             echo "(numastat not available)"
         else
             echo "numastat not available"
         fi
 
-        if [ -f /proc/$TARGET_PID/numa_maps ]; then
+        if [ -f "/proc/$TARGET_PID/numa_maps" ]; then
             dom=$(awk '{
                 for(i=1;i<=NF;i++) if($i ~ "^N[0-9]+=") {
                     split($i,a,"="); sum[a[1]]+=a[2]
                 }
             } END {
                 for(n in sum) if(sum[n] > max) {max=sum[n]; dom=n}
+                if(max==0) {print "none"; exit}
                 print dom
-            }' /proc/$TARGET_PID/numa_maps)
-            cpu_node=$(awk '$1==pid {print $NF}' pid=$TARGET_PID /proc/$TARGET_PID/stat 2>/dev/null)
+            }' "/proc/$TARGET_PID/numa_maps")
+            cpu_node=$(awk '$1==pid {print $NF}' pid="$TARGET_PID" "/proc/$TARGET_PID/stat" 2>/dev/null)
             numa_of_cpu="unknown"
             if [ -n "$cpu_node" ]; then
                 numa_of_cpu=$(lscpu -p=cpu,node 2>/dev/null | awk -F, -v cpu="$cpu_node" '$1==cpu {print $2}')

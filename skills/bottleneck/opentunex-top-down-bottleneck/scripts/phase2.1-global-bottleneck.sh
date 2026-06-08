@@ -89,7 +89,7 @@ collect_global_bottleneck() {
     sleep 5
     nstat -az | grep -E "^(TcpOutSegs|TcpRetransSegs|TcpExtTCPLostRetransmit|TcpExtListenOverflows|TcpExtListenDrops)" | awk '{print $1,$2}' > /tmp/nstat_after.txt
     echo "counter delta rate/s"
-    join /tmp/nstat_before.txt /tmp/nstat_after.txt | awk -v s=5 '{printf "%-40s %8d %8.1f\n", $1, $3-$2, ($3-$2)/s}'
+    join /tmp/nstat_before.txt /tmp/nstat_after.txt | awk -v s=5 '{if($3-$2>=0) printf "%-40s %8d %8.1f\n", $1, $3-$2, ($3-$2)/s}'
     rm -f /tmp/nstat_before.txt /tmp/nstat_after.txt
 
     echo ""
@@ -106,5 +106,5 @@ collect_global_bottleneck() {
     echo "============================================================"
 }
 
-parse_param "$@"
+trap 'rm -f /tmp/nstat_before.txt /tmp/nstat_after.txt 2>/dev/null; jobs -p | xargs -r kill 2>/dev/null' EXIT INT TERM
 collect_global_bottleneck

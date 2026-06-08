@@ -41,5 +41,4 @@ collect_top_processes() {
     echo "============================================================"
 }
 
-parse_param "$@"
 collect_top_processes

@@ -38,10 +38,20 @@ parse_param() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --pid)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --pid requires a value" >&2
+                    echo "Usage: bash $0 --pid <PID> [--duration <SECONDS>]" >&2
+                    exit 1
+                fi
                 PID="$2"
                 shift 2
                 ;;
             --duration)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --duration requires a value" >&2
+                    echo "Usage: bash $0 --pid <PID> [--duration <SECONDS>]" >&2
+                    exit 1
+                fi
                 DURATION="$2"
                 shift 2
                 ;;
@@ -68,6 +78,11 @@ parse_param() {
         echo "Error: Process with PID $PID does not exist" >&2
         exit 1
     fi
+
+    if ! [[ "$DURATION" =~ ^[0-9]+$ ]] || [ "$DURATION" -le 0 ]; then
+        echo "Error: --duration must be a positive integer, got: $DURATION" >&2
+        exit 1
+    fi
 }
 
 collect_syscall_analysis() {
@@ -76,18 +91,29 @@ collect_syscall_analysis() {
     echo "============================================================"
     echo ""
 
+    if [ ! -d "/proc/$PID" ]; then
+        echo "Error: PID $PID has exited before data collection" >&2
+        return 1
+    fi
+
     echo "--- strace -c -f: Aggregate syscall summary (counts, errors, times) ---"
-    timeout "$DURATION" strace -p "$PID" -c -f
+    timeout "$DURATION" strace -p "$PID" -c -f || true
 
     echo ""
     echo "--- strace -T -f: Per-call latency sample (${DURATION}s, top slowest) ---"
-    timeout "$DURATION" strace -p "$PID" -T -f -o /tmp/strace_T_phase3_2.log 2>&1 || true
-    if [ -f /tmp/strace_T_phase3_2.log ]; then
+    if [ ! -d "/proc/$PID" ]; then
+        echo "(PID $PID has exited, skipping per-call latency)" >&2
+    else
+        timeout "$DURATION" strace -p "$PID" -T -f -o /tmp/strace_T_phase3_2.log 2>&1 || true
+    fi
+    if [ -f /tmp/strace_T_phase3_2.log ] && [ -s /tmp/strace_T_phase3_2.log ]; then
         awk 'NF>=2 && $NF~/\.[0-9]+$/ {t=$NF; gsub(/[<>]/,"",t); print t, $0}' \
             /tmp/strace_T_phase3_2.log 2>/dev/null | \
             sort -k1 -rn 2>/dev/null | head -20
-        rm -f /tmp/strace_T_phase3_2.log
+    else
+        echo "(No per-call latency data captured)"
     fi
+    rm -f /tmp/strace_T_phase3_2.log 2>/dev/null
 
     echo ""
     echo "============================================================"
@@ -96,4 +122,5 @@ collect_syscall_analysis() {
 }
 
 parse_param "$@"
+trap 'rm -f /tmp/strace_T_phase3_2.log 2>/dev/null; jobs -p | xargs -r kill 2>/dev/null' EXIT INT TERM
 collect_syscall_analysis

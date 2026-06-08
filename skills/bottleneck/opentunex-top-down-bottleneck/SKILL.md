@@ -148,7 +148,7 @@ Use PMU (Performance Monitoring Unit) events to identify cache, branch, and pipe
 | CPU Efficiency | cycles, instructions, CPI = cycles/instructions | CPI > 2 (memory bound); CPI > 3 (severe memory bottleneck) |
 | Frontend Stall | stalled-cycles-frontend, cycles, stall % | stall% > 30% (frontend bound); > 50% (severe fetch bottleneck) |
 | Backend Stall | stalled-cycles-backend, cycles, stall % | stall% > 20% (backend bound); > 40% (memory latency issue) |
-| NUMA (SCCL) | remote_access, ll_cache_miss; cross-SCCL ratio = remote_access / (remote_access + ll_cache_miss) | cross-SCCL ratio > 30% (NUMA imbalance); > 50% (critical, severe cross-SCCL access) |
+| NUMA (SCCL) | remote_access, ll_cache; cross-SCCL ratio = remote_access / (remote_access + ll_cache) | cross-SCCL ratio > 30% (NUMA imbalance); > 50% (critical, severe cross-SCCL access) |
 
 **Output**: Microarchitecture bottleneck report with:
 
@@ -245,6 +245,8 @@ skill:sched-bottleneck
 # - CPU affinity and priority
 # - perf sched event analysis
 ```
+
+Each specified skill invoked should analyze the key process `PID` found in previous phases.
 
 ---
 

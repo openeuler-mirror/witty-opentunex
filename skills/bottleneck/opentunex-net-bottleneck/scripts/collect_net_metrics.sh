@@ -2,10 +2,9 @@
 # collect_net_metrics.sh - Collect network metrics for bottleneck analysis
 #
 # Usage:
-#   bash collect_net_metrics.sh [--pid <PID>] [--duration <SECONDS>]
+#   bash collect_net_metrics.sh [--duration <SECONDS>]
 #
 # Parameters:
-#   --pid      — Target process PID for per-process socket statistics (optional)
 #   --duration — Collection duration in seconds (default: 10)
 #
 # Examples:
@@ -15,54 +14,41 @@
 #   # 30-second collection:
 #   bash collect_net_metrics.sh --duration 30
 #
-#   # Target process collection:
-#   bash collect_net_metrics.sh --pid 12345 --duration 30
-#
 # Save output to file:
-#   bash collect_net_metrics.sh --pid 12345 --duration 30 > net_result.txt 2>&1
+#   bash collect_net_metrics.sh --duration 30 > net_result.txt 2>&1
 
 DURATION=10
-TARGET_PID=""
 INTERVAL=1
 
 parse_param() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --pid)
-                TARGET_PID="$2"
-                shift 2
-                ;;
             --duration)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    echo "Error: --duration requires a value" >&2
+                    echo "Usage: bash $0 [--duration <SECONDS>]" >&2
+                    exit 1
+                fi
                 DURATION="$2"
                 shift 2
                 ;;
             *)
                 echo "Unknown option: $1" >&2
-                echo "Usage: bash $0 [--pid <PID>] [--duration <SECONDS>]" >&2
+                echo "Usage: bash $0 [--duration <SECONDS>]" >&2
                 exit 1
                 ;;
         esac
     done
 
-    if [ -n "$TARGET_PID" ]; then
-        if ! [[ "$TARGET_PID" =~ ^[0-9]+$ ]]; then
-            echo "Error: --pid must be a numeric value, got: $TARGET_PID" >&2
-            exit 1
-        fi
-
-        if [ ! -d "/proc/$TARGET_PID" ]; then
-            echo "Error: Process with PID $TARGET_PID does not exist" >&2
-            exit 1
-        fi
+    if ! [[ "$DURATION" =~ ^[0-9]+$ ]] || [ "$DURATION" -le 0 ]; then
+        echo "Error: --duration must be a positive integer, got: $DURATION" >&2
+        exit 1
     fi
 }
 
 collect_net_metrics() {
     echo "=== Network Metrics Collection ==="
     echo "Duration: $DURATION seconds"
-    if [ -n "$TARGET_PID" ]; then
-        echo "Target PID: $TARGET_PID"
-    fi
     echo ""
 
     echo "=== Network Interfaces ==="
@@ -93,30 +79,30 @@ collect_net_metrics() {
     echo "=== NIC Configuration ==="
     for iface in $(ip -br link show | awk '$2=="UP" {print $1}' | grep -v lo | head -3); do
         echo "--- $iface ---"
-        echo "Link: $(ethtool $iface 2>/dev/null | grep -E 'Speed|Duplex|Link detected|Auto-negotiation' | sed 's/^\t*//')"
-        echo "Driver: $(ethtool -i $iface 2>/dev/null | grep -E 'driver|version|firmware|bus-info' | sed 's/^[^:]*: //' | paste -sd, -)"
+        echo "Link: $(ethtool "$iface" 2>/dev/null | grep -E 'Speed|Duplex|Link detected|Auto-negotiation' | sed 's/^\t*//')"
+        echo "Driver: $(ethtool -i "$iface" 2>/dev/null | grep -E 'driver|version|firmware|bus-info' | sed 's/^[^:]*: //' | paste -sd, -)"
         echo ""
         echo "[Queue/Channel]"
-        ethtool -l $iface 2>/dev/null
+        ethtool -l "$iface" 2>/dev/null
         echo ""
         echo "[Ring]"
-        ethtool -g $iface 2>/dev/null
+        ethtool -g "$iface" 2>/dev/null
         echo ""
         echo "[Coalesce]"
-        ethtool -c $iface 2>/dev/null
+        ethtool -c "$iface" 2>/dev/null
         echo ""
         echo "[Pause]"
-        ethtool -a $iface 2>/dev/null
+        ethtool -a "$iface" 2>/dev/null
         echo ""
         echo "[Offload]"
-        ethtool -k $iface 2>/dev/null
+        ethtool -k "$iface" 2>/dev/null
         echo ""
-        BUS_INFO=$(ethtool -i $iface 2>/dev/null | grep 'bus-info' | awk '{print $2}')
+        BUS_INFO=$(ethtool -i "$iface" 2>/dev/null | grep 'bus-info' | awk '{print $2}')
         if [ -n "$BUS_INFO" ]; then
             echo "--- IRQ Affinity ---"
             grep "$BUS_INFO" /proc/interrupts 2>/dev/null | while read -r line; do
                 IRQ=$(echo "$line" | awk '{print $1}' | tr -d ':')
-                AFFINITY=$(cat /proc/irq/$IRQ/smp_affinity 2>/dev/null || echo 'N/A')
+                AFFINITY=$(cat "/proc/irq/$IRQ/smp_affinity" 2>/dev/null || echo 'N/A')
                 DESC=$(echo "$line" | awk '{for(i=131;i<=NF;i++) printf "%s ", $i; print ""}' | sed 's/ *$//')
                 echo "IRQ $IRQ: $AFFINITY  ($DESC)"
             done
@@ -125,35 +111,58 @@ collect_net_metrics() {
     done
 
     ACTIVE_IFACES=$(ip -br link show | awk '$2=="UP" && $1!="lo" {print $1}' | paste -sd,)
-    sar -n DEV $INTERVAL $DURATION --iface=$ACTIVE_IFACES > /tmp/sar_dev_out.txt 2>&1 &
-    SAR_DEV_PID=$!
-    sar -n EDEV $INTERVAL $DURATION --iface=$ACTIVE_IFACES > /tmp/sar_edeve_out.txt 2>&1 &
-    SAR_EDEV_PID=$!
+    if [ -z "$ACTIVE_IFACES" ]; then
+        echo "(No active non-loopback interfaces found, skipping sar collection)"
+    else
+        sar -n DEV "$INTERVAL" "$DURATION" "--iface=$ACTIVE_IFACES" > /tmp/sar_dev_out.txt 2>&1 &
+        SAR_DEV_PID=$!
+        sar -n EDEV "$INTERVAL" "$DURATION" "--iface=$ACTIVE_IFACES" > /tmp/sar_edev_out.txt 2>&1 &
+        SAR_EDEV_PID=$!
+    fi
 
     GATEWAY=$(ip route | grep default | awk '{print $3}' | head -1)
-    ping -c 5 $GATEWAY 2>/dev/null > /tmp/ping_gw_out.txt &
-    PING_GW_PID=$!
+    if [ -n "$GATEWAY" ]; then
+        ping -c 5 "$GATEWAY" 2>/dev/null > /tmp/ping_gw_out.txt &
+        PING_GW_PID=$!
+    fi
     ping -c 5 127.0.0.1 2>/dev/null > /tmp/ping_lo_out.txt &
     PING_LO_PID=$!
 
     wait $SAR_DEV_PID $SAR_EDEV_PID $PING_GW_PID $PING_LO_PID 2>/dev/null
 
     echo "--- Network Device Stats (sar -n DEV) ---"
-    tail -n +4 /tmp/sar_dev_out.txt
+    if [ -s /tmp/sar_dev_out.txt ]; then
+        tail -n +4 /tmp/sar_dev_out.txt
+    else
+        echo "(sar DEV data unavailable)"
+    fi
     echo ""
     echo "--- Network Error Stats (sar -n EDEV) ---"
-    tail -n +4 /tmp/sar_edeve_out.txt
+    if [ -s /tmp/sar_edev_out.txt ]; then
+        tail -n +4 /tmp/sar_edev_out.txt
+    else
+        echo "(sar EDEV data unavailable)"
+    fi
     echo ""
+
     echo "--- Latency Test (to gateway) ---"
-    echo "Default gateway: $GATEWAY"
-    [ -s /tmp/ping_gw_out.txt ] && tail -2 /tmp/ping_gw_out.txt || echo "No gateway found"
+    echo "Default gateway: ${GATEWAY:-none}"
+    if [ -s /tmp/ping_gw_out.txt ]; then
+        tail -2 /tmp/ping_gw_out.txt
+    else
+        echo "(No gateway ping data)"
+    fi
     echo ""
     echo "--- Loopback Latency Test ---"
     tail -2 /tmp/ping_lo_out.txt
     echo ""
 
     echo "--- TCP Statistics ---"
-    netstat -s 2>/dev/null | sed -n '/^Tcp:/,/^$/p' | head -50
+    if command -v netstat >/dev/null 2>&1; then
+        netstat -s 2>/dev/null | sed -n '/^Tcp:/,/^$/p' | head -50
+    else
+        echo "(netstat not available, skipping)"
+    fi
     echo ""
 
     echo "--- Socket Summary ---"
@@ -168,26 +177,11 @@ collect_net_metrics() {
     ss -tan 2>/dev/null | awk '{print $1}' | sort | uniq -c | sort -rn | head -10
     echo ""
 
-    if [ -n "$TARGET_PID" ] && [ -d "/proc/$TARGET_PID" ]; then
-        echo "=== Target Process Socket Statistics ==="
-        echo "Process: $(cat /proc/$TARGET_PID/comm 2>/dev/null || echo 'unknown')"
-        echo "--- Open Sockets ---"
-        ss -tanp 2>/dev/null | grep "pid=$TARGET_PID" | head -30
-        echo ""
-        echo "--- Socket State Summary ---"
-        ss -tanp 2>/dev/null | grep "pid=$TARGET_PID" | awk '{print $1}' | sort | uniq -c | sort -rn
-        echo ""
-        echo "--- Socket Memory for PID $TARGET_PID ---"
-        ss -tmp 2>/dev/null | grep "pid=$TARGET_PID" | head -20
-        echo ""
-        echo "--- Process Network Connections Count ---"
-        TOTAL_CONN=$(ss -tanp 2>/dev/null | grep -c "pid=$TARGET_PID" || echo 0)
-        echo "Total TCP connections: $TOTAL_CONN"
-        echo ""
-    fi
+    rm -f /tmp/sar_dev_out.txt /tmp/sar_edev_out.txt /tmp/ping_gw_out.txt /tmp/ping_lo_out.txt
 
     echo "=== Collection Complete ==="
 }
 
 parse_param "$@"
+trap 'rm -f /tmp/sar_dev_out.txt /tmp/sar_edev_out.txt /tmp/ping_gw_out.txt /tmp/ping_lo_out.txt 2>/dev/null; jobs -p | xargs -r kill 2>/dev/null' EXIT INT TERM
 collect_net_metrics
