@@ -38,6 +38,23 @@ ssh-copy-id ${username}@${ip}
 ssh ${username}@${ip} echo 'Connection verified'
 ```
 
+## File Upload Discipline (CRITICAL)
+
+To deliver a local file to the client, ALWAYS use one of:
+
+```bash
+# Option A: scp then ssh-execute (preferred when the remote copy should persist)
+scp <local> ${username}@${ip}:/tmp/<name>
+ssh -q -tt ${username}@${ip} 'sh /tmp/<name>'
+
+# Option B: stream-and-execute (no remote copy retained)
+ssh -q -tt ${username}@${ip} 'bash -s' < <local>
+```
+
+NEVER read the file's content with the Read tool and inline it into an ssh command via heredoc / `echo >` / `printf >` / `tee`. This wastes tokens, fails on binary files, breaks on shell metacharacters (`$`, `\`, backticks, quotes), and produces a remote file that is not byte-identical to the source.
+
+Heredocs are fine for *authoring a local script file before scp* — they are NOT for transporting file content across the SSH boundary.
+
 ## Command Execution Patterns
 
 ### Simple Commands
@@ -50,12 +67,14 @@ ssh -q -tt ${username}@${ip} 'uname -r'
 ssh -q -tt ${username}@${ip} 'cd /tmp && ls -la'
 ```
 
-### Complex Commands
+### Commands That Won't Fit In ssh (Fallback)
 
-For complex operations with pipes, quotes, or long scripts:
+ssh direct execution is the default path. Reach for this fallback only when a command cannot be expressed inside a single ssh argv — argv length limits, hostile quoting, deeply nested escapes, etc.
+
+When the fallback applies: **author the script locally as a file, then deliver it to the client with scp — never with an ssh inline write.**
 
 ```bash
-# Create script locally
+# 1) Author the script as a local file. Heredoc here writes to LOCAL disk, not across SSH.
 cat > /tmp/analyze.sh << 'SCRIPT'
 #!/bin/bash
 # Complex analysis commands
@@ -63,10 +82,10 @@ vmstat 1 10 > vmstat.log
 pidstat -w 1 10 > pidstat.log
 SCRIPT
 
-# Copy to remote
+# 2) Deliver it to the client with scp (the ONLY supported transport mechanism)
 scp /tmp/analyze.sh ${username}@${ip}:/tmp/
 
-# Execute on remote
+# 3) Execute it on the client
 ssh -q -tt ${username}@${ip} 'sh /tmp/analyze.sh'
 ```
 
@@ -102,11 +121,11 @@ ssh -q -tt ${username}@${ip} 'cd /tmp && perf sched timehist | head -100'
 
 ### Long Running Commands
 
-Extend timeout to 300+ seconds:
+Extend timeout to 1200+ seconds:
 
 ```bash
 # With explicit timeout
-timeout 300 ssh -q -tt ${username}@${ip} 'perf sched record -a -- sleep 60'
+timeout 1200 ssh -q -tt ${username}@${ip} 'perf sched record -a -- sleep 60'
 ```
 
 ### Background Execution
@@ -162,7 +181,7 @@ fi
 ### Timeout Errors
 
 ```bash
-timeout 60 ssh -q -tt ${username}@${ip} 'long_command'
+timeout 1200 ssh -q -tt ${username}@${ip} 'long_command'
 if [ $? -eq 124 ]; then
   echo "Command timed out"
 fi
@@ -175,5 +194,5 @@ fi
 3. **Use `ssh -q`** to suppress banner messages
 4. **Keep scripts on remote** to avoid SCP issues
 5. **Analyze remotely** - never copy large data back
-6. **Extend timeout** for collection commands (300 sec)
+6. **Extend timeout** for collection commands (1200 sec)
 7. **Request confirmation** for destructive operations
