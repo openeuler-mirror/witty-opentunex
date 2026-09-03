@@ -9,7 +9,7 @@ description: "numa并行感知调度分析。检查PARAL特性支持、分析NUM
 
 ## 强制约束
 
-> 本技能遵守 [场景分析子技能共享约束](../common-constraints.md) 中定义的所有执行约束和数据目录约定。
+> 本技能遵守 [场景分析子技能共享约束](../references/common-constraints.md) 中定义的所有执行约束和数据目录约定。
 >
 > 本技能的数据目录名为 `opentunex-numa-sched-analysis_collect`。
 
@@ -23,6 +23,16 @@ description: "numa并行感知调度分析。检查PARAL特性支持、分析NUM
 
 本技能**禁止自行采集数据**，数据缺失时在结果中标注 `DATA_MISSING`，由协调器决定是否触发补充采集。
 
+### 执行模式与 `${WORK_DIR}` 语义（核心）
+
+- 输入契约携带 `execution_context`（`execution_mode` / `user` / `ip`）。**远端模式**（execution_mode=remote）：`${WORK_DIR}` 与 `${DATA_DIR}` 都是**远端服务器上**的路径：
+  - `scripts/preanalysis.sh` 远端执行**必须加载并遵循 `opentunex-remote-execution` skill 的执行方式**（`ssh -q ${user}@${ip} "mkdir -p /tmp/opentunex-numa-sched-analysis/"` → scp 上传脚本到远端 `scp scripts/preanalysis.sh ${user}@${ip}:/tmp/opentunex-numa-sched-analysis/` → 远端执行`ssh -q -tt ${user}@${ip} "bash /tmp/opentunex-numa-sched-analysis/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-numa-sched-analysis_collect"`；session 超时按该 skill 扩展为 1200 秒；**禁止**读取脚本内容后自行合成命令代替执行。**禁止**在 agent 本地执行该脚本或读写本地 `${DATA_DIR}` 路径
+  - 读取 `${DATA_DIR}` 下的数据文件：`ssh -q ${user}@${ip} "cat <文件>"` 流回上下文分析，**禁止** scp 拷回本地
+  - 写入 result.md / 输出契约到 `${WORK_DIR}/analysis/...`：**直接在远端机器上产出**——经 ssh 在远端落盘（`ssh ${user}@${ip} "mkdir -p <目录> && cat > <文件>"`，heredoc 写入内容）；**禁止**先在 agent 本地生成文件再 scp 上传、**禁止**在 agent 本地创建 `${WORK_DIR}` 目录
+  - "调优步骤推荐"中的命令仅作为报告建议输出，本技能**不执行**；用户确认后由用户在远端服务器上执行
+- **本地模式**（execution_mode=local）：脚本与命令直接本地执行。
+- 具体写法见 `opentunex-remote-execution` skill（含其 `references/work_dir_remote_semantics.md`）。
+
 ---
 
 ## 执行流程
@@ -31,29 +41,29 @@ description: "numa并行感知调度分析。检查PARAL特性支持、分析NUM
 
 | 步骤 | 操作 | 产出 |
 |------|------|------|
-| 1 | 执行 `../../scripts/opentunex-numa-sched-analysis/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-numa-sched-analysis_collect` | `preanalysis.json` |
-| 2 | 读取 `preanalysis.json`，按"字段→决策变量映射"表提取决策变量 | 决策变量值 |
+| 1 | 执行 `scripts/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-numa-sched-analysis_collect`（本地模式直接执行；远端模式按 `opentunex-remote-execution` skill 执行方式先 `ssh -q ${user}@${ip} "mkdir -p /tmp/opentunex-numa-sched-analysis/"`，然后 `scp scripts/preanalysis.sh ${user}@${ip}:/tmp/opentunex-numa-sched-analysis/` 再 `ssh -q -tt ${user}@${ip} "bash /tmp/opentunex-numa-sched-analysis/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-numa-sched-analysis_collect"`，`preanalysis.json` 生成在**远端**输出目录，禁止在 agent 本地执行） | `preanalysis.json` |
+| 2 | 读取 `preanalysis.json`，按"字段→决策变量映射"表提取决策变量（远端模式：`ssh -q ${user}@${ip} "cat ${DATA_DIR}/opentunex-numa-sched-analysis_collect/preanalysis.json"` 流回上下文；**禁止**在 agent 本地用 Read 工具读取 `${DATA_DIR}` 路径） | 决策变量值 |
 | 3 | 按"决策逻辑"章节依次执行环境与特性前置检查 → 路径 A PMU HHA 判定（或降级到路径 B vmstat/numastat 判定） | 分析结论 |
 | 4 | 按"产出"章节模板，将决策结果写入 `${WORK_DIR}/analysis/opentunex-numa-sched-analysis_collect/result.md` | 完整分析报告（含结构化数据 JSON） |
 | 5 | 按"契约输出"章节格式写入输出契约 YAML 文件 | 契约文件 |
 
-> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。
+> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。**远端模式**下 `preanalysis.json` 生成在远端服务器输出目录 `${DATA_DIR}/opentunex-numa-sched-analysis_collect/`，步骤 2 必须经 ssh `cat` 流回上下文读取，**禁止**在 agent 本地目录查找或读取该文件。步骤 1 为强制预解析模式：仅当步骤 1 执行失败或 `preanalysis.json` 不存在时才允许进入"数据读取"章节的降级路径，**禁止**跳过步骤 1 直接读取原始数据文件。**预解析模式下禁止直接读取 `scripts/preanalysis.sh` 脚本内容**（不得 Read/cat 脚本文件本身）：本地模式直接执行脚本；远端模式按 `opentunex-remote-execution` skill 执行方式 scp 上传脚本文件到远端后 ssh 执行，无需阅读脚本实现。
 
 ---
 
 ## 数据读取
 
-> **优先级**：本技能提供 `../../scripts/opentunex-numa-sched-analysis/preanalysis.sh` 脚本对原始采集数据进行预处理。优先执行脚本生成 `preanalysis.json`，然后基于 JSON 进行分析。逐文件读取原始数据仅作为降级路径。
+> **强制顺序**：本技能提供 `scripts/preanalysis.sh` 脚本对原始采集数据进行预处理。**必须先执行脚本生成 `preanalysis.json` 并基于 JSON 进行分析，禁止跳过预解析模式直接逐文件读取原始数据**。仅当预解析模式失败（脚本执行失败或 `preanalysis.json` 不存在，远端模式经 ssh 在远端确认）后，才允许进入下方降级路径。
 
 NUMA 远程访问瓶颈的判定采用**双路径**：优先使用 PMU HHA 数据（精确），降级使用 vmstat/numastat 数据（近似）。
 
-### 优先路径：预分析 JSON（推荐）
+### 预解析模式（强制首选）：预分析 JSON
 
-1. 执行预处理脚本生成 JSON：
+1. 执行预处理脚本生成 JSON（远端模式：按 `opentunex-remote-execution` skill 执行方式 scp 上传后 `ssh -q -tt` 在远端执行，见"输入约定"执行模式章节）：
    ```bash
-   bash ../../scripts/opentunex-numa-sched-analysis/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-numa-sched-analysis_collect
+   bash scripts/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-numa-sched-analysis_collect
    ```
-2. 读取生成的 JSON 文件：`${DATA_DIR}/opentunex-numa-sched-analysis_collect/preanalysis.json`
+2. 读取生成的 JSON 文件：`${DATA_DIR}/opentunex-numa-sched-analysis_collect/preanalysis.json`（远端模式：`ssh -q ${user}@${ip} "cat ${DATA_DIR}/opentunex-numa-sched-analysis_collect/preanalysis.json"` 流回上下文读取；**禁止**在 agent 本地用 Read 工具读取 `${DATA_DIR}` 路径、禁止 scp 拷回本地）
 
 #### preanalysis.json 字段 → 决策变量映射
 
@@ -74,12 +84,13 @@ NUMA 远程访问瓶颈的判定采用**双路径**：优先使用 PMU HHA 数�
 
 > **注意**：`pmu_path_applicable` 和 `remote_access_ratio` 已由脚本预计算，可直接用于决策逻辑判定路径 A/B 和 NB2-NB4 阈值比较，无需再手动计算。
 
-### 降级路径：逐文件读取（仅当 preanalysis.json 不可用时）
+### 降级路径：逐文件读取（仅当预解析模式失败后）
 
-> 以下为逐文件读取原始采集数据的解析规则。仅在以下情况使用：
-> - `preanalysis.json` 文件不存在
+> 以下为逐文件读取原始采集数据的解析规则。**仅当预解析模式已执行且确认失败后才可使用**，禁止跳过预解析模式直接进入本路径。仅在以下情况使用：
+> - `preanalysis.json` 文件不存在（远端模式：经 `ssh ${user}@${ip} "test -f ${DATA_DIR}/opentunex-numa-sched-analysis_collect/preanalysis.json"` 在远端判断，禁止在 agent 本地查找）
 > - 脚本 `preanalysis.sh` 执行失败
-> - 需要交叉验证 JSON 中的数据
+>
+> **⚠️ 大文件警告**：采集数据文件可能非常大，**禁止**直接 `cat`/Read 整个文件。必须按下方每个指标的提取方法（grep 关键字 / sed 定位节）**定向搜索**目标内容，只读取命中的片段；远端模式经 ssh 在远端执行 grep，只把命中片段流回上下文，禁止把整个文件拉回 agent 本地。
 
 #### 路径 A：PMU HHA 数据（优先，从 `${DATA_DIR}/pmu_info.txt` 读取）
 
@@ -190,6 +201,8 @@ NUMA 远程访问瓶颈的判定采用**双路径**：优先使用 PMU HHA 数�
 ## 调优步骤推荐
 
 > 以下调优步骤仅在分析结论为"适用"时适用。结论为"不适用"或"收益有限"时不执行调优。
+>
+> **执行位置说明**：本技能只输出建议，**不执行**调优命令（遵守 T-01/T-02）。远端模式下这些命令的目标机器是远端服务器——用户确认后由用户（或后续调优域技能生成的 tuning.sh）在**远端服务器**上执行；agent 不通过 ssh 代执行调优命令。
 
 ### 调优参数
 
@@ -204,8 +217,8 @@ NUMA 远程访问瓶颈的判定采用**双路径**：优先使用 PMU HHA 数�
 
 ```bash
 # 使用调优脚本（推荐）
-bash ../../scripts/opentunex-numa-sched-analysis/numa_sched_tune.sh check    # 环境检查
-bash ../../scripts/opentunex-numa-sched-analysis/numa_sched_tune.sh apply    # 启用 PARAL + sched_util_low_pct=100
+bash scripts/numa_sched_tune.sh check    # 环境检查
+bash scripts/numa_sched_tune.sh apply    # 启用 PARAL + sched_util_low_pct=100
 
 # 或手动执行
 echo 100 > /proc/sys/kernel/sched_util_low_pct
@@ -222,7 +235,7 @@ grep -E 'PARAL|NO_PARAL' /sys/kernel/debug/sched/features
 ### 回滚命令
 
 ```bash
-bash ../../scripts/opentunex-numa-sched-analysis/numa_sched_tune.sh rollback
+bash scripts/numa_sched_tune.sh rollback
 # 或手动: echo NO_PARAL > /sys/kernel/debug/sched/features; 恢复 sched_util_low_pct 原始值
 ```
 
@@ -238,7 +251,7 @@ bash ../../scripts/opentunex-numa-sched-analysis/numa_sched_tune.sh rollback
 
 ## 产出
 
-将分析结果写入 `${WORK_DIR}/analysis/opentunex-numa-sched-analysis_collect/result.md`，格式如下：
+将分析结果写入 `${WORK_DIR}/analysis/opentunex-numa-sched-analysis_collect/result.md`（远端模式：**直接在远端机器上产出该文件**——经 ssh 在远端落盘（`ssh ${user}@${ip} "mkdir -p <目录> && cat > <路径>"`，heredoc 写入内容）；**禁止**先在 agent 本地生成文件再 scp 上传、禁止在 agent 本地创建 `${WORK_DIR}` 目录），格式如下：
 
 ```markdown
 # numa并行感知调度分析结果
@@ -293,7 +306,7 @@ bash ../../scripts/opentunex-numa-sched-analysis/numa_sched_tune.sh rollback
 ### 使能命令
 
 ```bash
-bash ../../scripts/opentunex-numa-sched-analysis/numa_sched_tune.sh apply
+bash scripts/numa_sched_tune.sh apply
 ```
 
 ### 验证
@@ -306,7 +319,7 @@ grep PARAL /sys/kernel/debug/sched/features
 ### 回滚
 
 ```bash
-bash ../../scripts/opentunex-numa-sched-analysis/numa_sched_tune.sh rollback
+bash scripts/numa_sched_tune.sh rollback
 ```
 ```
 
@@ -336,7 +349,7 @@ bash ../../scripts/opentunex-numa-sched-analysis/numa_sched_tune.sh rollback
 ```
 
 > **字段填充说明**：
-> - `applicability`：分析结论为"适用"→ `"applicable"`；"收益有限"→ `"limited_benefit"`；"不适用"→ `"not_applicable"`。映射标准见 [统一映射表](../result-template.md#零子技能结论--结构化数据映射统一标准)
+> - `applicability`：分析结论为"适用"→ `"applicable"`；"收益有限"→ `"limited_benefit"`；"不适用"→ `"not_applicable"`。映射标准见 [统一映射表](../references/result-template.md#零子技能结论--结构化数据映射统一标准)
 > - `estimated_gain.severity`：使用评估矩阵判定（瓶颈严重程度 × 建议匹配效能）→ `high` / `medium` / `low`
 > - 若 applicability 为 `"not_applicable"`：`estimated_gain.severity` 设为 `"low"`，`suggestion` 填写不适用/收益有限的原因描述
 > - 若 applicability 为 `"limited_benefit"`：`estimated_gain.severity` 设为 `"low"`，正常参与融合流程
@@ -347,7 +360,7 @@ bash ../../scripts/opentunex-numa-sched-analysis/numa_sched_tune.sh rollback
 
 ## 契约输出
 
-输出契约格式参见 [contract-spec.md](../contract-spec.md)，本技能特有字段：
+输出契约格式参见 [contract-spec.md](../references/contract-spec.md)，本技能特有字段：
 
 ```yaml
 skill_name: "opentunex-numa-sched-analysis"
@@ -357,4 +370,4 @@ input:
   collect_dir: "[actual collect_dir]"
 output:
   analysis_report_path: "[actual analysis_report_path]"
-constraints_acknowledged: [SB-01~SB-06]
+constraints_acknowledged: [SB-01~SB-07]

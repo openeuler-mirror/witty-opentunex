@@ -58,9 +58,21 @@ extract_static_info() {
         cpu_per_numa=${cpu_per_numa:-0}
     fi
     if ((cpu_per_numa == 0)); then
+        # 回退: 从 NUMA node0 CPU(s) 行提取
+        local numa_cpu_line
+        numa_cpu_line=$(grep -E 'NUMA node[0-9]+ CPU\(s\):' "$sfile" 2>/dev/null | head -1 || true)
+        if [[ -n "$numa_cpu_line" ]]; then
+            local cpu_list2
+            cpu_list2=$(echo "$numa_cpu_line" | sed 's/.*:\s*//' | tr ',' ' ')
+            cpu_per_numa=$(echo "$cpu_list2" | awk '{print NF}' 2>/dev/null || true)
+            cpu_per_numa=${cpu_per_numa:-0}
+        fi
+    fi
+    if ((cpu_per_numa == 0)); then
         # 回退: 用 CPU(s) / NUMA_NODES 估算
         local total_cpus
-        total_cpus=$(grep -oP 'CPU\(s\):\s+\K\d+' "$sfile" 2>/dev/null || true)
+        total_cpus=$(grep -E '^CPU\(s\):' "$sfile" 2>/dev/null | head -1 | grep -oE '[0-9]+' | head -1 || true)
+        total_cpus=${total_cpus:-1}
         if [[ -n "$total_cpus" && "$numa_nodes" -gt 0 ]]; then
             cpu_per_numa=$((total_cpus / numa_nodes))
         fi
@@ -69,6 +81,8 @@ extract_static_info() {
     # KERNEL_VER: 搜索 Kernel: 或 uname -r 输出的内核版本号
     kernel_ver=$(grep -E 'Kernel:' "$sfile" | head -1 | awk '{for(i=2;i<=NF;i++) printf "%s ",$i; print ""}' | sed 's/[[:space:]]*$//' 2>/dev/null || true)
     [[ -z "$kernel_ver" ]] && kernel_ver=$(grep -E 'uname -r' "$sfile" | head -1 | awk '{print $NF}' | tr -d '[:space:]' 2>/dev/null || true)
+    # 兜底：--- Kernel Version --- 区块格式（版本号在下一行）
+    [[ -z "$kernel_ver" ]] && kernel_ver=$(sed -n '/^--- Kernel Version ---$/{n;p;q}' "$sfile" 2>/dev/null | tr -d '[:space:]' || true)
 
     echo "$arch $numa_nodes $cpu_per_numa $(json_escape "$kernel_ver")"
 }
@@ -136,7 +150,7 @@ extract_container_info() {
 
     local container_count=0
     local small_quota_instances=0
-    local -a quota_entries=()
+    declare -a quota_entries=()
 
     local cfile=""
     if [[ -f "${data_dir}/docker_info.txt" ]]; then
@@ -255,7 +269,7 @@ parse_container_cgroup() {
 
     local container_count=0
     local small_quota_instances=0
-    local -a quota_entries=()
+    declare -a quota_entries=()
 
     while IFS= read -r line; do
         if [[ "$line" =~ cpu\.cfs_quota_us[[:space:]]*=[[:space:]]*(-?[0-9]+) ]]; then
@@ -431,7 +445,7 @@ extract_numa_cpu_map() {
 
     [[ ! -f "$sfile" ]] && { echo "$cpu_map"; return; }
 
-    local -a node_mappings=()
+    declare -a node_mappings=()
     while IFS= read -r line; do
         if [[ "$line" =~ ^node\ ([0-9]+)\ cpus?:\ (.+)$ ]]; then
             local node_id="${BASH_REMATCH[1]}"
@@ -493,8 +507,8 @@ main() {
     # ---- 从 docker_info.txt / container_info.txt 提取 ----
     local container_count small_quota_instances quota_list_json
     {
-        read -r container_count small_quota_instances
-        read -r quota_list_json
+        read -r container_count small_quota_instances || true
+        read -r quota_list_json || true
     } <<< "$(extract_container_info "$DATA_DIR" "$cpu_per_numa")"
 
     # ---- 从 top_processes.txt / process_info.txt 提取 ----
@@ -514,9 +528,9 @@ main() {
   "debugfs_mounted": "$(json_escape "$debugfs_mounted")",
   "container_count": ${container_count},
   "small_quota_instances": ${small_quota_instances},
-  "container_quota_list": ${quota_list_json},
-  "target_pid": ${target_pid},
-  "target_cpus_allowed": "$(json_escape "$target_cpus_allowed")",
+  "container_quota_list": ${quota_list_json:-[]},
+  "target_pid": ${target_pid:-null},
+  "target_cpus_allowed": "$(json_escape "${target_cpus_allowed:-null}")",
   "target_cpu_affinity_span": ${target_cpu_affinity_span},
   "numa_cpu_map": ${numa_cpu_map}
 }

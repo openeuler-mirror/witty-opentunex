@@ -32,7 +32,7 @@ parse_affinity_to_cpus() {
     local mask="$1"
     local cpus=()
     local cpu_idx=0
-    local -a blocks
+    declare -a blocks
 
     # 长格式：按逗号拆分
     IFS=',' read -ra blocks <<< "$mask"
@@ -75,14 +75,16 @@ json_array() {
     done
 }
 
-# CPU→NUMA 映射（全局，由 build_cpu_to_numa_map 填充）
-declare -A CPU_TO_NUMA=()
+# CPU→NUMA 映射（bash 3.2 兼容：平行索引数组替代关联数组）
+CTN_KEYS=(); CTN_VALS=()
+ctn_get() { local _k="$1" _i; for _i in "${!CTN_KEYS[@]}"; do [[ "${CTN_KEYS[$_i]}" == "$_k" ]] && { printf '%s' "${CTN_VALS[$_i]}"; return 0; }; done; printf 'node0'; return 1; }
+ctn_set() { local _k="$1" _v="$2" _i; for _i in "${!CTN_KEYS[@]}"; do [[ "${CTN_KEYS[$_i]}" == "$_k" ]] && { CTN_VALS[$_i]="$_v"; return 0; }; done; CTN_KEYS+=("$_k"); CTN_VALS+=("$_v"); }
 
 # 从 numa_cpu_map JSON 构建 CPU→NUMA 映射
 # 输入: numa_map_json，格式如 {"node0": [0,1,2,3], "node1": [4,5,6,7]}
 build_cpu_to_numa_map() {
     local numa_map_json="$1"
-    CPU_TO_NUMA=()
+    CTN_KEYS=(); CTN_VALS=()
     while IFS= read -r pair; do
         [[ -z "$pair" ]] && continue
         local node_name
@@ -96,7 +98,7 @@ build_cpu_to_numa_map() {
         for cpu_str in $cpus_str; do
             cpu_str=$(echo "$cpu_str" | tr -d '[:space:]')
             [[ -z "$cpu_str" ]] && continue
-            CPU_TO_NUMA["$cpu_str"]="$node_name"
+            ctn_set "$cpu_str" "$node_name"
         done
     done < <(echo "$numa_map_json" | grep -oP '"node[0-9]+":\s*\[[\d\s,]+\]')
 }
@@ -221,18 +223,34 @@ extract_irqbalance() {
 
 extract_numa_info() {
     local sfile="$1"
+    local cfile="${2:-}"  # 修复: 新增 cpu_detail_info 路径用于回退
     local nodes=0
     local cpu_map="{}"
     [[ ! -f "$sfile" ]] && { echo "$nodes"; echo "$cpu_map"; return; }
 
+    # 修复: 优先从 static_info.txt 读 --- NUMA Topology --- 节
+    #       如果为空，回退到 cpu_detail_info.txt 的 --- nodeN --- 节
+    local numa_section
+    numa_section=$(sed -n '/^--- NUMA Topology ---$/,/^--- /p' "$sfile" 2>/dev/null | grep -E '^node [0-9]+ cpus?:' || true)
+    if [[ -z "$numa_section" && -n "$cfile" && -f "$cfile" ]]; then
+        # 从 cpu_detail_info.txt 抓 "CPU列表: 0-1" 之类行
+        numa_section=$(grep -E '^CPU列表:' "$cfile" 2>/dev/null || true)
+    fi
+
     # 统计 NUMA 节点数（仅匹配 "node X cpus:" 行，排除 "node X size:" / "node X free:"）
-    nodes=$(sed -n '/^--- NUMA Topology ---$/,/^--- /p' "$sfile" | grep -cE '^node [0-9]+ cpus?:' 2>/dev/null || true)
+    nodes=$(echo "$numa_section" | grep -cE '^node [0-9]+ cpus?:' 2>/dev/null || true)
+    nodes=${nodes:-0}
     if ((nodes == 0)); then
-        nodes=$(grep -oP 'available:\s+\K\d+' "$sfile" 2>/dev/null || echo "1")
+        # 回退: 从 "NUMA node(s): N" 提取
+        nodes=$(grep -oE 'NUMA node\(s\):[[:space:]]+[0-9]+' "$sfile" 2>/dev/null | head -1 | grep -oE '[0-9]+$' || echo "")
+        if [[ -z "$nodes" ]]; then
+            nodes=$(grep -oP 'NUMA node\(s\):\s+\K\d+' "$sfile" 2>/dev/null | head -1 || echo "")
+        fi
+        nodes=${nodes:-1}
     fi
 
     # 构建 NUMA CPU 映射
-    local -a node_mappings=()
+    declare -a node_mappings=()
     while IFS= read -r line; do
         if [[ "$line" =~ ^node\ ([0-9]+)\ cpus?:\ (.+)$ ]]; then
             local node_id="${BASH_REMATCH[1]}"
@@ -241,8 +259,23 @@ extract_numa_info() {
             local cpus_json
             cpus_json=$(echo "$cpu_list" | tr ' ' '\n' | grep -v '^$' | sed 's/^/"/;s/$/"/' | paste -sd ',' -)
             node_mappings+=("\"node${node_id}\": [${cpus_json}]")
+        elif [[ -n "$cfile" && -f "$cfile" && "$line" =~ ^CPU列表:[[:space:]]*(.+) ]]; then
+            # 修复: 处理 cpu_detail_info.txt "CPU列表: 0-1" 格式（单 NUMA 节点情况）
+            # 展开 "0-1" 范围到 [0, 1]（之前未展开会导致 ["0-1"] 错误输出）
+            local cpu_list="${BASH_REMATCH[1]}"
+            local cpus_json
+            cpus_json=$(echo "$cpu_list" | tr ',' '\n' | grep -v '^$' | while IFS= read -r item; do
+                if [[ "$item" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+                    awk -v s="${BASH_REMATCH[1]}" -v e="${BASH_REMATCH[2]}" \
+                        'BEGIN{for(i=s;i<=e;i++) printf "\"%d\",", i; exit}' \
+                        | sed 's/,$//'
+                else
+                    echo "\"$item\""
+                fi
+            done | paste -sd ',' -)
+            node_mappings+=("\"node0\": [${cpus_json}]")
         fi
-    done < <(sed -n '/^--- NUMA Topology ---$/,/^--- /p' "$sfile")
+    done <<< "$numa_section"
 
     if ((${#node_mappings[@]} > 0)); then
         cpu_map="{"
@@ -264,14 +297,27 @@ extract_interrupt_overview() {
     local overview="无数据"
     local eth_lines=""
 
+    # 修复: 同时识别常见 NIC 驱动产生的中断名，避免仅匹配 "eth" 而漏掉 hns3/hclge/mlx/ixgbe/i40e/ice 等驱动
+    # 使用 command grep 绕过执行环境中可能被 shell 函数覆盖的 grep（如 Claude Code 的 ugrep 包装）。
+    local NIC_IRQ_RE='eth[0-9]?|hns[3-]?|hclge|mlx[45]_(comp|[tr]x)|i40e|ice|eno|enp|ens|ixgbe'
+
     # 优先从 cpu_detail_info.txt 的 /proc/interrupts 节提取
+    # 修复: 先用 sed 把节内容读出到内存，再用 here-string 喂给 grep，
+    #       避免 sed | grep 在 set -o pipefail 下被 grep 早退触发的 SIGPIPE 污染
     if [[ -f "$cfile" ]]; then
-        eth_lines=$(sed -n '/=== \/proc\/interrupts ===/,/^=== /p' "$cfile" | grep -i 'eth' 2>/dev/null || true)
+        local irq_section
+        irq_section=$(sed -n '/=== \/proc\/interrupts ===/,/^=== /p' "$cfile" 2>/dev/null || true)
+        if [[ -n "$irq_section" ]]; then
+            eth_lines=$(command grep -iE "$NIC_IRQ_RE" <<< "$irq_section" 2>/dev/null || true)
+        fi
     fi
 
     # 回退：从 network_metrics_analysis.txt 的 IRQ Affinity 节提取
+    # 该节每行格式如: "IRQ 53: <mask>  (...)  ITS-MSI <n> Edge hns3-...-TxRx-0"
+    # 原匹配 'IRQ.*eth|eth.*IRQ' 在 hns3/mlx 等驱动上完全无命中，需扩展驱动名集合
     if [[ -z "$eth_lines" && -n "$nfile" && -f "$nfile" ]]; then
-        eth_lines=$(grep -iE 'IRQ.*eth|eth.*IRQ' "$nfile" 2>/dev/null | head -20 || true)
+        eth_lines=$(command grep -iE "IRQ.*($NIC_IRQ_RE)|($NIC_IRQ_RE).*IRQ" "$nfile" 2>/dev/null \
+            | head -20 || true)
     fi
 
     if [[ -z "$eth_lines" ]]; then
@@ -309,35 +355,86 @@ extract_app_info() {
     [[ -f "$tfile" ]] && combined+="$(cat "$tfile")"$'\n'
     [[ -z "$combined" ]] && { echo "$redis $nginx $mysql $target_pid"; return; }
 
-    # 先从进程输出中找 redis/nginx/mysql
-    if echo "$combined" | grep -q "redis-server" 2>/dev/null && ! echo "$combined" | grep -q "redis-server.*未运行" 2>/dev/null; then
+    # 新逻辑：文件里出现 redis-server / nginx / mysqld 关键字时，对应标志位即为 true
+    # 修复1: 使用 command grep 绕过执行环境中可能被 shell 函数覆盖的 grep
+    #        （如 Claude Code 的 ugrep 包装会把 piped stdin 当作文件名模式搜索文件系统）
+    # 修复2: 改用 here-string `<<<` 而非 `echo … | grep -q`：
+    #        combined 较大（>100KB）时，grep -q 命中后早退，echo 会收到 SIGPIPE（退出码 141），
+    #        set -o pipefail 会把这个错误冒到 if 条件，导致 redis/nginx/mysql 永远为 false。
+    if command grep -q "redis-server" <<< "$combined"; then
         redis=true
-        target_pid=$(echo "$combined" | grep "redis-server" | grep -oP '\d+' | head -1 || echo "null")
     fi
-    if echo "$combined" | grep -q "nginx" 2>/dev/null && ! echo "$combined" | grep -q "nginx.*未运行" 2>/dev/null; then
+    if command grep -q "nginx" <<< "$combined"; then
         nginx=true
-        [[ "$target_pid" == "null" ]] && target_pid=$(echo "$combined" | grep "nginx" | grep -oP '\d+' | head -1 || echo "null")
     fi
-    if echo "$combined" | grep -q "mysqld\|mysql" 2>/dev/null && ! echo "$combined" | grep -q "mysql.*未运行" 2>/dev/null; then
+    if command grep -q "mysqld" <<< "$combined"; then
         mysql=true
-        [[ "$target_pid" == "null" ]] && target_pid=$(echo "$combined" | grep -E "mysqld|mysql" | grep -oP '\d+' | head -1 || echo "null")
     fi
 
-    # 回退：从 top / ps 节中按进程名匹配
-    if ! $redis && ! $nginx && ! $mysql; then
-        if echo "$combined" | grep -qE 'redis-server' 2>/dev/null; then
-            redis=true
-            target_pid=$(echo "$combined" | grep -E 'redis-server' | grep -oP '^\s*\K\d+' | head -1 || echo "null")
-        fi
-        if echo "$combined" | grep -qE '\bnginx\b' 2>/dev/null; then
-            nginx=true
-            [[ "$target_pid" == "null" ]] && target_pid=$(echo "$combined" | grep -E '\bnginx\b' | grep -oP '^\s*\K\d+' | head -1 || echo "null")
-        fi
-        if echo "$combined" | grep -qE '\bmysqld\b' 2>/dev/null; then
-            mysql=true
-            [[ "$target_pid" == "null" ]] && target_pid=$(echo "$combined" | grep -E '\bmysqld\b' | grep -oP '^\s*\K\d+' | head -1 || echo "null")
+    # 提取首个命中行的 PID（用作 target_pid）
+    # 修复: 只匹配 `ps aux` 格式行（USER <PID> %CPU %MEM ... COMMAND），
+    #       锁住第 1 列为用户名（无空格）、第 2 列为数字 PID、
+    #       第 3/4 列为 %CPU/%MEM（带小数点的数字），
+    #       避免误抓 pidstat 行的 $2（12h 制时是 AM/PM），
+    #       也避免误抓 pidstat 的 `Average:` 汇总行。
+    #       ps aux 字段顺序固定为 USER PID %CPU %MEM ...，所以 $2 就是 PID。
+    if [[ "$target_pid" == "null" ]]; then
+        local first_match
+        first_match=$(command grep -E '^[^[:space:]]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+\.[0-9]+[[:space:]]+[0-9]+\.[0-9]+.*(redis-server|nginx|mysqld)' <<< "$combined" | grep -vE "(redis-server|nginx|mysqld).*未运行" | head -1 || true)
+        if [[ -n "$first_match" ]]; then
+            target_pid=$(echo "$first_match" | awk '{print $2}' || echo "null")
         fi
     fi
+
+    # ===== 以下为原检测逻辑，已注释掉 =====
+    # # 修复: 所有 redis-server / nginx / mysqld 检测都需排除 "未运行" 状态行
+    # # 第一轮：进程表行匹配（ps aux 格式：USER PID %CPU %MEM ... COMMAND）
+    # # 必须包含 PID 数字 + 不是 "未运行" 状态行
+    # if echo "$combined" | grep -E "^[^[:space:]]+[[:space:]]+[0-9]+[[:space:]]+[0-9.,]+[[:space:]]+.*redis-server" 2>/dev/null \
+    #     | grep -vE "redis-server.*未运行" | head -1 | grep -q .; then
+    #     redis=true
+    #     target_pid=$(echo "$combined" | grep -E "^[^[:space:]]+[[:space:]]+[0-9]+[[:space:]]+[0-9.,]+[[:space:]]+.*redis-server" \
+    #         | grep -vE "redis-server.*未运行" | head -1 | awk '{print $2}' || echo "null")
+    # fi
+    # if echo "$combined" | grep -E "^[^[:space:]]+[[:space:]]+[0-9]+[[:space:]]+[0-9.,]+[[:space:]]+.*\bnginx\b" 2>/dev/null \
+    #     | grep -vE "nginx.*未运行" | head -1 | grep -q .; then
+    #     nginx=true
+    #     if [[ "$target_pid" == "null" ]]; then
+    #         target_pid=$(echo "$combined" | grep -E "^[^[:space:]]+[[:space:]]+[0-9]+[[:space:]]+[0-9.,]+[[:space:]]+.*\bnginx\b" \
+    #             | grep -vE "nginx.*未运行" | head -1 | awk '{print $2}' || echo "null")
+    #     fi
+    # fi
+    # if echo "$combined" | grep -E "^[^[:space:]]+[[:space:]]+[0-9]+[[:space:]]+[0-9.,]+[[:space:]]+.*\bmysqld\b" 2>/dev/null \
+    #     | grep -vE "mysqld.*未运行" | head -1 | grep -q .; then
+    #     mysql=true
+    #     if [[ "$target_pid" == "null" ]]; then
+    #         target_pid=$(echo "$combined" | grep -E "^[^[:space:]]+[[:space:]]+[0-9]+[[:space:]]+[0-9.,]+[[:space:]]+.*\bmysqld\b" \
+    #             | grep -vE "mysqld.*未运行" | head -1 | awk '{print $2}' || echo "null")
+    #     fi
+    # fi
+    #
+    # # 修复: 回退块也需排除 "未运行"
+    # if ! $redis && ! $nginx && ! $mysql; then
+    #     if echo "$combined" | grep -E 'redis-server' 2>/dev/null | grep -vE "redis-server.*未运行" | head -1 | grep -q .; then
+    #         redis=true
+    #         target_pid=$(echo "$combined" | grep -E 'redis-server' | grep -vE "redis-server.*未运行" \
+    #             | head -1 | awk '{print $2}' || echo "null")
+    #     fi
+    #     if echo "$combined" | grep -E '\bnginx\b' 2>/dev/null | grep -vE "nginx.*未运行" | head -1 | grep -q .; then
+    #         nginx=true
+    #         if [[ "$target_pid" == "null" ]]; then
+    #             target_pid=$(echo "$combined" | grep -E '\bnginx\b' | grep -vE "nginx.*未运行" \
+    #                 | head -1 | awk '{print $2}' || echo "null")
+    #         fi
+    #     fi
+    #     if echo "$combined" | grep -E '\bmysqld\b' 2>/dev/null | grep -vE "mysqld.*未运行" | head -1 | grep -q .; then
+    #         mysql=true
+    #         if [[ "$target_pid" == "null" ]]; then
+    #             target_pid=$(echo "$combined" | grep -E '\bmysqld\b' | grep -vE "mysqld.*未运行" \
+    #                 | head -1 | awk '{print $2}' || echo "null")
+    #         fi
+    #     fi
+    # fi
 
     echo "$redis $nginx $mysql $target_pid"
 }
@@ -357,7 +454,12 @@ extract_physical_nics() {
     [[ ! -f "$nfile" ]] && return
 
     # 只提取符合网卡命名模式的节标题（排除 "IRQ Affinity"、"sar -n DEV" 等非网卡节）
-    grep -oP '(?<=^--- ).*(?= ---$)' "$nfile" 2>/dev/null | while IFS= read -r iface; do
+    # 兼容 GNU grep (-oP) 和 BSD grep (-oE)，使用 perl 作为通用回退
+    if grep -qP 'test' <<< "test" 2>/dev/null; then
+        grep -oP '(?<=^--- ).*(?= ---$)' "$nfile" 2>/dev/null
+    else
+        perl -ne 'print "$1\n" if /^--- (.+) ---$/' "$nfile" 2>/dev/null
+    fi | while IFS= read -r iface; do
         is_skip_iface "$iface" && continue
         is_physical_nic "$iface" || continue
         echo "$iface"
@@ -401,8 +503,18 @@ extract_queues() {
     local nfile="$1" iface="$2"
     local max_q=0 cur_q=0
 
+    # 修复: 优先尝试 "ethtool -l" 子节，没有时回退到整个 iface 节
+    # 之前在没有 "ethtool -l" 标题时直接得到空，awk 无结果
     local ethtool_l
-    ethtool_l=$(sed -n "/^--- ${iface} ---$/,/^--- /p" "$nfile" | sed -n '/ethtool -l/,/^$/p' 2>/dev/null || true)
+    ethtool_l=$(sed -n "/^--- ${iface} ---$/,/^--- /p" "$nfile" 2>/dev/null | sed -n '/ethtool -l/,/^$/p' 2>/dev/null || true)
+    if [[ -z "$ethtool_l" ]]; then
+        # 回退 1: 整个 iface 节
+        ethtool_l=$(sed -n "/^--- ${iface} ---$/,/^--- /p" "$nfile" 2>/dev/null || true)
+    fi
+    if [[ -z "$ethtool_l" ]]; then
+        # 回退 2: 整个文件
+        ethtool_l=$(cat "$nfile" 2>/dev/null || true)
+    fi
 
     # 单次 awk 解析，同时提取 Combined 的最大和当前值
     # 需正确处理 Pre-set maximums 和 Current hardware settings 两个区块
@@ -538,24 +650,28 @@ extract_irq_numa() {
     if [[ -z "$irq_section" ]]; then
         irq_section=$(sed -n "/^--- ${iface} ---$/,/^--- /p" "$nfile" | sed -n '/IRQ Affinity/,/^--- /p' 2>/dev/null || true)
     fi
-    [[ -z "$irq_section" ]] && { echo "0 "; return; }
+    # 修复: 用换行符分隔避免之前 "0 " 末尾空格导致 (( numa_span == 1 )) 解析失败
+    [[ -z "$irq_section" ]] && { echo $'0\t'; return; }
 
-    # 收集 IRQ 涉及的所有 NUMA 节点
-    local -A numa_hit=()
+    # 收集 IRQ 涉及的所有 NUMA 节点（bash 3.2 兼容：字符串累加 + sort -u 去重）
+    local numa_hit=""
     while IFS= read -r line; do
         if [[ "$line" =~ IRQ\ [0-9]+:\ ([0-9a-fA-F,]+) ]]; then
             local mask="${BASH_REMATCH[1]}"
-            local -a cpus
+            declare -a cpus
             read -ra cpus <<< "$(parse_affinity_to_cpus "$mask")"
-            # 反查每个 CPU 属于哪个 NUMA 节点
             for cpu in "${cpus[@]}"; do
-                local node="${CPU_TO_NUMA[$cpu]:-node0}"
-                numa_hit["$node"]=1
+                local node; node=$(ctn_get "$cpu")
+                numa_hit="${numa_hit} ${node}"
             done
         fi
     done <<< "$irq_section"
 
-    numa_span=${#numa_hit[@]}
+    # 修复: 之前用 `|| echo 0` 在 grep 无匹配（退出码 1）时会追加 "0"，
+    #       导致 numa_span="0\n0" 触发 (( syntax error
+    #       改为先 `|| true` 再用 awk 显式处理
+    numa_span=$(echo "$numa_hit" | tr ' ' '\n' | sort -u | awk 'NF{c++} END{print c+0}')
+    numa_span=${numa_span:-0}
 
     if ((numa_span >= 2)); then
         annotation="中断跨NUMA，多路径收益明确"
@@ -638,7 +754,7 @@ compute_recommended_params() {
     local appname=""
 
     # ---- appname: 按 redis > nginx > mysql 优先级拼接 ----
-    local -a app_list=()
+    declare -a app_list=()
     [[ "$apps_redis" == "true" ]]  && app_list+=("redis-server")
     [[ "$apps_nginx" == "true" ]]  && app_list+=("nginx")
     [[ "$apps_mysql" == "true" ]]  && app_list+=("mysqld")
@@ -730,11 +846,11 @@ main() {
     local oenetcls_loaded oenetcls_available oenetcls_name
     read -r oenetcls_loaded oenetcls_available oenetcls_name <<< "$(extract_oenetcls_info "$KFILE")"
 
-    local irqbalance irqbalance_svc
+    local irqbalance="unknown" irqbalance_svc="irqbalance"
     { read -r irqbalance; read -r irqbalance_svc; } <<< "$(extract_irqbalance "$KFILE")"
 
-    local numa_nodes numa_cpu_map
-    { read -r numa_nodes; read -r numa_cpu_map; } <<< "$(extract_numa_info "$SFILE")"
+    local numa_nodes=1 numa_cpu_map="{}"
+    { read -r numa_nodes; read -r numa_cpu_map; } <<< "$(extract_numa_info "$SFILE" "$CFILE")"
     numa_nodes=${numa_nodes:-1}
 
     # 构建 CPU→NUMA 映射（供 extract_irq_numa 使用）
@@ -747,8 +863,8 @@ main() {
     read -r apps_redis apps_nginx apps_mysql target_app_pid <<< "$(extract_app_info "$DATA_DIR")"
 
     # ---- 网卡信息 ----
-    local -a physical_nics=()
-    local -a nic_json_entries=()
+    declare -a physical_nics=()
+    declare -a nic_json_entries=()
 
     if [[ -f "$NFILE" ]]; then
         while IFS= read -r iface; do
@@ -759,7 +875,7 @@ main() {
     fi
 
     # 如果没有网卡，回退：从 static_info 中推断
-    if ((${#physical_nics[@]} == 0)) && [[ -f "$SFILE" ]]; then
+    if [[ ${#physical_nics[@]} -eq 0 ]] && [[ -f "$SFILE" ]]; then
         while IFS= read -r iface; do
             [[ -z "$iface" ]] && continue
             is_skip_iface "$iface" && continue
@@ -768,6 +884,7 @@ main() {
             | awk '/^[a-z]/ {print $1}' 2>/dev/null || true)
     fi
 
+    if [[ ${#physical_nics[@]} -gt 0 ]]; then
     for iface in "${physical_nics[@]}"; do
         local has_ntuple ntuple_fixed ntuple_enabled
         read -r has_ntuple ntuple_fixed ntuple_enabled <<< "$(extract_ntuple "$NFILE" "$iface")"
@@ -826,28 +943,31 @@ INNEREOF
 )
         nic_json_entries+=("$entry")
     done
+    fi  # physical_nics 非空时执行
 
     # ---- 构建 JSON ----
     local nics_json=""
     local first=1
-    for entry in "${nic_json_entries[@]}"; do
+    for entry in "${nic_json_entries[@]:-}"; do
         ((first)) && first=0 || nics_json+=",$'\n'"
         nics_json+="$entry"
     done
 
     local pnics_json=""
     first=1
+    if [[ ${#physical_nics[@]} -gt 0 ]]; then
     for n in "${physical_nics[@]}"; do
         ((first)) && first=0 || pnics_json+=", "
         pnics_json+="\"$n\""
     done
+    fi
 
     # ---- 调优参数推荐 ----
     # 收集 recommend_enable 网卡名（按 # 拼接）和最小 max_q、首个驱动
-    local -a rec_ifnames=()
+    declare -a rec_ifnames=()
     local rec_min_max_q=""
     local rec_driver="unknown"
-    for entry in "${nic_json_entries[@]}"; do
+    for entry in "${nic_json_entries[@]:-}"; do
         if echo "$entry" | grep -q '"recommend_enable": true'; then
             local cur_iface cur_max_q cur_driver
             cur_iface=$(echo "$entry" | grep -oP '"iface":\s*"\K[^"]+' | head -1)

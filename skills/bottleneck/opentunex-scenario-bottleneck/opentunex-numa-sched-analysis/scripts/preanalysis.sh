@@ -36,14 +36,14 @@ extract_pmu_info() {
 
     # 提取 ops_per_sec（不依赖 /sys/devices/hha* 路径，各平台路径不同）
     local ops_line
-    ops_line=$(grep -oP 'ops_per_sec=\K[0-9]+' "$pfile" 2>/dev/null | head -1 || true)
+    ops_line=$(grep -oE 'ops_per_sec=[0-9]+' "$pfile" 2>/dev/null | head -1 | sed 's/ops_per_sec=//' || true)
     if [[ -n "$ops_line" ]]; then
         ops_per_sec=$ops_line
     fi
 
     # 提取 remote_ratio
     local ratio_line
-    ratio_line=$(grep -oP 'remote_ratio=\K[0-9.]+' "$pfile" 2>/dev/null | head -1 || true)
+    ratio_line=$(grep -oE 'remote_ratio=[0-9.]+' "$pfile" 2>/dev/null | head -1 | sed 's/remote_ratio=//' || true)
     if [[ -n "$ratio_line" ]]; then
         remote_ratio=$ratio_line
     fi
@@ -68,11 +68,14 @@ extract_vmstat_info() {
     [[ ! -f "$mfile" ]] && { echo "$numa_hit $numa_miss $numa_foreign $remote_access_ratio"; return; }
 
     # 搜索 NUMA Statistics 节
+    # 注意：sed 范围模式 /start/,/end/ 中，结束正则 /^=== / 会匹配节标题自身
+    # （=== NUMA Statistics === 以 "=== " 开头），导致只捕获标题行，数据行被丢弃
+    # 改用 awk：找到标题行后设标志，遇到下一个节标题时退出，两标题之间即为数据
     local numa_section
-    numa_section=$(sed -n '/=== NUMA Statistics ===/,/^=== /p' "$mfile" 2>/dev/null || true)
+    numa_section=$(awk '/^=== NUMA Statistics ===$/{found=1; next} found && /^=== /{exit} found{print}' "$mfile" 2>/dev/null || true)
     # 也尝试 --- NUMA Statistics --- 定界符
     if [[ -z "$numa_section" ]]; then
-        numa_section=$(sed -n '/--- NUMA Statistics ---/,/^--- /p' "$mfile" 2>/dev/null || true)
+        numa_section=$(awk '/^--- NUMA Statistics ---$/{found=1; next} found && /^--- /{exit} found{print}' "$mfile" 2>/dev/null || true)
     fi
     # 回退：搜索整个文件中 numastat 相关行
     if [[ -z "$numa_section" ]]; then
@@ -80,9 +83,9 @@ extract_vmstat_info() {
     fi
 
     if [[ -n "$numa_section" ]]; then
-        numa_hit=$(echo "$numa_section" | grep -oP 'numa_hit\s+\K[0-9]+' | head -1 || echo "0")
-        numa_miss=$(echo "$numa_section" | grep -oP 'numa_miss\s+\K[0-9]+' | head -1 || echo "0")
-        numa_foreign=$(echo "$numa_section" | grep -oP 'numa_foreign\s+\K[0-9]+' | head -1 || echo "0")
+        numa_hit=$(echo "$numa_section" | grep -oE 'numa_hit[[:space:]]+[0-9]+' | head -1 | sed 's/numa_hit[[:space:]]*//' || echo "0")
+        numa_miss=$(echo "$numa_section" | grep -oE 'numa_miss[[:space:]]+[0-9]+' | head -1 | sed 's/numa_miss[[:space:]]*//' || echo "0")
+        numa_foreign=$(echo "$numa_section" | grep -oE 'numa_foreign[[:space:]]+[0-9]+' | head -1 | sed 's/numa_foreign[[:space:]]*//' || echo "0")
     fi
 
     # 计算 REMOTE_ACCESS_RATIO = NUMA_MISS / (NUMA_HIT + NUMA_MISS) × 100
@@ -102,9 +105,9 @@ extract_numa_nodes() {
     [[ ! -f "$sfile" ]] && { echo "$nodes"; return; }
 
     # 仅匹配 "node X cpus:" 行，排除 "node X size:" / "node X free:"
-    nodes=$(sed -n '/^--- NUMA Topology ---$/,/^--- /p' "$sfile" | grep -cE '^node [0-9]+ cpus?:' 2>/dev/null || true)
+    nodes=$(awk '/^--- NUMA Topology ---$/{found=1; next} found && /^--- /{exit} found{print}' "$sfile" | grep -cE '^node [0-9]+ cpus?:' 2>/dev/null || true)
     if ((nodes == 0)); then
-        nodes=$(grep -oP 'available:\s+\K\d+' "$sfile" 2>/dev/null || true)
+        nodes=$(grep -oE 'available:[[:space:]]+[0-9]+' "$sfile" 2>/dev/null | head -1 | sed 's/available:[[:space:]]*//' || true)
         nodes=${nodes:-1}
     fi
     echo "$nodes"
@@ -121,7 +124,7 @@ extract_paral_info() {
 
     # 提取调度特性节
     local sched_section
-    sched_section=$(sed -n '/=== 调度特性 ===/,/^=== /p' "$kfile" 2>/dev/null || true)
+    sched_section=$(awk '/^=== 调度特性 ===$/{found=1; next} found && /^=== /{exit} found{print}' "$kfile" 2>/dev/null || true)
 
     # PARAL 支持检测
     if echo "$sched_section" | grep -q "PARAL: present" 2>/dev/null; then
@@ -141,21 +144,17 @@ extract_paral_info() {
     # SCHED_UTIL_LOW_PCT 提取
     # 格式：在"特殊调度参数"节中，sched_util_ratio 行后紧跟一行
     local special_section
-    special_section=$(sed -n '/=== 特殊调度参数 ===/,/^=== /p' "$kfile" 2>/dev/null || true)
+    special_section=$(awk '/^=== 特殊调度参数 ===$/{found=1; next} found && /^=== /{exit} found{print}' "$kfile" 2>/dev/null || true)
     if [[ -n "$special_section" ]]; then
-        if echo "$special_section" | grep -q "not exist\|not set\|无法获取" 2>/dev/null; then
-            sched_util_low_pct="null"
-        else
-            # 尝试提取数字
-            local pct_val
-            pct_val=$(echo "$special_section" | grep -oP 'sched_util_low_pct[=:]\s*\K[0-9]+' 2>/dev/null | head -1 || true)
-            if [[ -z "$pct_val" ]]; then
-                # 尝试 sched_util_ratio 相邻行
-                pct_val=$(echo "$special_section" | grep -A1 'sched_util_ratio' | tail -1 | grep -oP '^\s*\K[0-9]+' | head -1 || true)
-            fi
-            if [[ -n "$pct_val" ]]; then
-                sched_util_low_pct="$pct_val"
-            fi
+        # 尝试提取数字
+        local pct_val
+        pct_val=$(echo "$special_section" | grep -oE 'sched_util_low_pct[=:][[:space:]]*[0-9]+' 2>/dev/null | head -1 | sed 's/sched_util_low_pct[=:][[:space:]]*//' || true)
+        if [[ -z "$pct_val" ]]; then
+            # 尝试 sched_util_ratio 相邻行
+            pct_val=$(echo "$special_section" | grep -A1 'sched_util_ratio' | tail -1 | grep -oE '^[[:space:]]*[0-9]+' | head -1 | sed 's/^[[:space:]]*//' || true)
+        fi
+        if [[ -n "$pct_val" ]]; then
+            sched_util_low_pct="$pct_val"
         fi
     fi
 
