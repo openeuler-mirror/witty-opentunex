@@ -8,6 +8,8 @@ constraints_version: "v1.0"
 ## T-02: 禁止SSH远程执行调优
 不允许通过SSH连接远程机器执行调优命令。
 
+- 远端场景（目标为远端服务器）时，`${WORK_DIR}` 为远端路径：调优域对 `${WORK_DIR}` 的文件操作（读融合报告、写契约、写中间态建议、部署调优脚本）须经 `opentunex-remote-execution` 的 ssh 机制在远端执行；调优脚本部署到远端后仍由**用户确认后在远端服务器上执行**（T-01/T-02 不变，agent 不代执行）。详见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`
+
 ## T-03: 禁止自动修改系统参数
 不允许自动执行修改系统参数的命令。
 

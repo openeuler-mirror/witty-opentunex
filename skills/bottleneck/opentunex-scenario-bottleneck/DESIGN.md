@@ -37,7 +37,7 @@
 
 ### 动态发现
 
-协调器通过扫描 `references/` 目录下 `opentunex-*` 前缀的子目录动态发现场景分析技能，新增场景时只需在 `references/` 下创建新的子目录并包含 `analysis-guide.md` 即可，无需修改协调器逻辑。
+协调器通过扫描当前目录下的子目录动态发现场景分析技能，新增场景时只需创建新子目录即可，无需修改协调器逻辑。
 
 ## 分析流程
 
@@ -46,7 +46,7 @@ Step 1: 数据接收
 ├→ 从数据采集层读取系统指标
 └→ 校验数据完整性
 
-Step 2: 全量调度（并行）
+Step 2: 全量调度（串行）
 ├→ opentunex-docker-coordination-burst-analysis
 ├→ opentunex-dynamic-smt-analysis
 ├→ opentunex-numa-sched-analysis
