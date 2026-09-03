@@ -9,6 +9,7 @@ description: 协调器 Phase 2 提取契约 — 定义从 result.md 提取字段
 
 子技能的输出约定（由各子技能 SKILL.md "产出"节自行定义）：
 - 每个子技能在 `${WORK_DIR}/analysis/<skill_name>_collect/result.md` 写入分析结果
+- 远端场景：result.md **直接在远端机器产出**（经 ssh 在远端落盘，`${WORK_DIR}` 为远端路径），**禁止**在 agent 本地生成后 scp 上传，详见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`
 - 分析结果包含叙述性分析结论区块和 `## 结构化数据` JSON 区块
 - 协调器统一提取，交叉验证，填充融合报告
 

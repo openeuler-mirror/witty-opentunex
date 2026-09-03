@@ -65,6 +65,4 @@
 
 ## 报告输出路径
 
-中间态调优建议保存至：`${WORK_DIR}/tuning/<timestamp>/intermediate/<调优方向>.md`
-
-每次生成时按当前日期时间创建新目录，并更新 `latest` 符号链接指向最新批次。
+中间态调优建议保存至：`${WORK_DIR}/tuning/intermediate/<调优方向>.md`

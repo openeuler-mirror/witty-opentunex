@@ -68,42 +68,21 @@ opentunex-scenario-bottleneck/
 ├── SKILL.md                                          # 协调器入口
 ├── DESIGN.md                                         # 设计文档
 ├── README.md                                         # 本文件
-├── references/                                       # 参考文档与子技能定义
-│   ├── constraints-bottleneck.md                     # 瓶颈分析域强制约束
-│   ├── common-constraints.md                         # 场景分析子技能共享约束
-│   ├── contract-spec.md                              # 子智能体契约文件规范
-│   ├── fusion-rules.md                               # 场景分析报告融合规则
-│   ├── output-template.md                            # 融合报告输出模板
-│   ├── result-template.md                            # 协调器提取契约
-│   ├── opentunex-btb-analysis/analysis-guide.md               # BTB适用性分析
-│   ├── opentunex-copy-user-analysis/analysis-guide.md         # copy_from_user拷贝优化分析
-│   ├── opentunex-docker-coordination-burst-analysis/analysis-guide.md  # Docker算力统筹分析
-│   ├── opentunex-dynamic-smt-analysis/analysis-guide.md       # 动态SMT分析
-│   ├── opentunex-hisock-analysis/analysis-guide.md            # hisock网络加速分析
-│   ├── opentunex-multi-net-path-analysis/analysis-guide.md    # 网卡多路径瓶颈分析
-│   ├── opentunex-numa-sched-analysis/analysis-guide.md        # numa并行感知调度分析
-│   ├── opentunex-soft-domain-analysis/analysis-guide.md       # 分域调度分析
-│   └── opentunex-stealtask-analysis/analysis-guide.md         # 窃取任务调度分析
-└── scripts/                                          # 子技能分析/调优脚本
-    ├── opentunex-btb-analysis/preanalysis.sh
-    ├── opentunex-copy-user-analysis/preanalysis.sh
-    ├── opentunex-docker-coordination-burst-analysis/
-    │   ├── preanalysis.sh
-    │   └── docker_coordination_burst.sh
-    ├── opentunex-dynamic-smt-analysis/
-    │   ├── preanalysis.sh
-    │   └── dynamic_smt_tune.sh
-    ├── opentunex-hisock-analysis/preanalysis.sh
-    ├── opentunex-multi-net-path-analysis/
-    │   ├── preanalysis.sh
-    │   └── multi_net_path_tune.sh
-    ├── opentunex-numa-sched-analysis/
-    │   ├── preanalysis.sh
-    │   └── numa_sched_tune.sh
-    ├── opentunex-soft-domain-analysis/
-    │   ├── preanalysis.sh
-    │   └── soft_domain_tune.sh
-    └── opentunex-stealtask-analysis/
-        ├── preanalysis.sh
-        └── stealtask_tune.sh
+├── references/
+├── opentunex-docker-coordination-burst-analysis/
+│   ├── SKILL.md                                      # Docker burst 分析
+│   └── scripts/
+│       └── analyze_burst.py                          # 分析脚本
+├── opentunex-dynamic-smt-analysis/
+│   ├── SKILL.md                                      # 动态SMT分析
+│   └── scripts/
+│       └── analyze_smt.py                            # 分析脚本
+├── opentunex-numa-sched-analysis/
+│   ├── SKILL.md                                      # NUMA分析
+│   └── scripts/
+│       └── analyze_numa.py                           # 分析脚本
+└── opentunex-stealtask-analysis/
+    ├── SKILL.md                                      # 窃取任务分析
+    └── scripts/
+        └── analyze_stealtask.py                      # 分析脚本
 ```
