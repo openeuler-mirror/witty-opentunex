@@ -1,172 +1,211 @@
 ---
 name: collection-items-reference
-description: 各维度采集项与数据存储位置速查表，每个采集项输出一份聚合报告文件
+description: bottleneck_data_collector.sh 各数据文件与采集数据项速查表
 ---
 
-# 各维度采集项与数据存储位置速查表
+# 瓶颈采集数据文件与采集项速查表
 
-> **日志**: 每次脚本执行的完整输出同步写入 `${WORK_DIR}/collect/collect_log/<item>_YYYYMMDD_HHMMSS.log`，便于追踪和回溯。
+> **采集脚本**: 唯一采集脚本 `scripts/bottleneck_data_collector.sh`
 >
-> **归档**: 所有采集项统一写入批次目录 `${WORK_DIR}/collect/`。
+> **输出目录**: `-o` 指定目录（默认 `bottleneck_data_<arch>_<时间戳>/`）
 >
-> **输出模式**: 每个采集项输出 **一份聚合报告文件** `<item>-collection_report.txt`，包含该维度全部采集数据。脚本直接落盘，不经过 skill 读取或格式转换。
+> **输出模式**: 每个采集项输出 **一份数据文件**，脚本直接落盘，不经过 skill 读取或格式转换。
 
-## cpu → 报告 `cpu-collection_report.txt`
+## static_info.txt — 系统静态信息
 
-脚本: `scripts/collect_cpu_info.sh`
+脚本函数: `collect_static_info`（Phase 1）
 
 | 采集项 | 采集方式 |
 |--------|---------|
-| CPU 型号与架构 | `lscpu` / `/proc/cpuinfo` |
-| 在线 CPU 核心列表及数量 | `/sys/devices/system/cpu/online`、`nproc` |
-| NUMA 拓扑 (节点距离、CPU-NUMA 映射) | `/sys/devices/system/node/node*/`、`numactl --hardware` |
-| NUMA 节点数量 | `ls /sys/devices/system/node/node* | wc -l` |
-| 每个 CPU 所属 NUMA 节点 | `/sys/devices/system/cpu/cpu*/topology/physical_package_id` |
-| 各核心利用率 (%user, %sys, %iowait, %idle 等) | `mpstat -P ALL 1 5` |
-| /proc/stat 差值计算 (两次快照) | `/proc/stat` 间隔 1s |
-| 中断与软中断分布 | `/proc/interrupts`、`/proc/softirqs` |
-| CPU 频率与调频策略 | `/sys/devices/system/cpu/cpu*/cpufreq/` |
-| SMT 是否开启及拓扑 | `/sys/devices/system/cpu/smt/active`、`thread_siblings_list` |
+| CPU 型号/插槽/核数/缓存 | `lscpu`、`dmidecode -t processor` |
+| NUMA 拓扑 | `numactl --hardware` |
+| 内存 DIMM 信息 | `dmidecode -t memory` |
+| 物理内存/大页概览 | `/proc/meminfo` 关键字段 |
+| 磁盘设备与拓扑 | `lsblk`、`/proc/scsi/scsi` |
+| 网卡型号/驱动/固件 | `lspci`、`ethtool -i` |
+| 硬件型号、CPU 频率调节 | `dmidecode -t system`、cpufreq sysfs |
+| OS/内核/GCC/glibc 版本 | `/etc/os-release`、`uname`、`gcc`、`ldd` |
+| 内核启动参数 | `/proc/cmdline` |
+| 性能相关 sysctl | `vm.*`、`net.*`、`kernel.sched*`、`fs.*` |
+| 性能相关内核模块 | `lsmod` |
+| 内核编译选项 | `/boot/config-*`（NO_HZ/HZ_1000/PREEMPT） |
+| 透明大页、IO 调度器、IRQ 亲和 | THP sysfs、`/sys/block/*/queue/scheduler`、`/proc/irq/default_smp_affinity` |
 
-## mem → 报告 `mem-collection_report.txt`
+## global_bottleneck.txt — 全局资源瓶颈指标
 
-脚本: `scripts/collect_mem_info.sh`
+脚本函数: `collect_global_bottleneck`（Phase 2）
 
 | 采集项 | 采集方式 |
 |--------|---------|
-| 完整物理内存信息 | `/proc/meminfo` |
-| 虚拟内存累计统计 | `/proc/vmstat` |
+| 每核 CPU 利用率（跳过空闲核） | `mpstat -P ALL` |
+| 负载 vs CPU 数、上下文切换/中断 | `/proc/loadavg`、`vmstat` |
+| Top 30 上下文切换任务 | `pidstat -w` |
+| Swap 使用与压力、关键 Swap 指标 | `free -h`、`/proc/meminfo` |
+| Top 20 缺页任务 | `pidstat -r` |
+| Slab 内存使用 | `/proc/meminfo` |
+| 磁盘利用率（跳过 0% util） | `iostat -xz` |
+| 队列深度 (inflight_IO) | `/proc/diskstats` |
+| 磁盘空间、Top 20 IO 进程 | `df -h`、`pidstat -d` |
+| 网络接口统计/错误统计 | `sar -n DEV/EDEV` |
+| TCP 重传与丢包（5s delta） | `nstat` |
+| 连接积压、Top 10 端口 | `ss` |
+
+## top_processes.txt — 顶级资源消耗进程
+
+脚本函数: `collect_top_processes`（Phase 1）
+
+| 采集项 | 采集方式 |
+|--------|---------|
+| Top 20 CPU 进程 | `ps aux --sort=-%cpu` |
+| Top 20 内存进程 | `ps aux --sort=-%mem` |
+| Top 20 IO 进程 | `iotop`、`pidstat -d` |
+
+## cpu_detail_info.txt — CPU 深度信息
+
+脚本函数: `collect_cpu_detail_info`（Phase 2）
+
+| 采集项 | 采集方式 |
+|--------|---------|
+| 在线 CPU 列表及数量 | `/sys/devices/system/cpu/online` |
+| 完整 CPU 信息 | `/proc/cpuinfo` |
+| NUMA 节点 sysfs 详情 | `/sys/devices/system/node/node*` |
+| SMT 超线程状态 | `/sys/devices/system/cpu/smt/active`、`thread_siblings_list` |
+| CPU 频率与调频策略 | cpufreq sysfs |
+| 硬件 CPPC 支持 | `/proc/cpuinfo` |
+| 中断分布 | `/proc/interrupts` |
+| /proc/stat 解析 + 多采样 | `/proc/stat`（间隔 INTERVAL 秒，持续 DURATION 秒） |
+
+## kernel_config_info.txt — 内核配置与诊断
+
+脚本函数: `collect_kernel_config_info`（Phase 1）
+
+| 采集项 | 采集方式 |
+|--------|---------|
+| 全量内核参数 | `sysctl -a` |
+| 关键网络参数、命名空间限制 | `sysctl` 过滤 |
+| 启动参数特殊项（xcall 等） | `/proc/cmdline` |
+| 调度特性 | `/sys/kernel/debug/sched_features` |
+| 特殊调度参数 | `sched_cluster`、`sched_util_ratio`、`sched_soft_runtime_ratio`、`sched_max_steal_count` |
+| 完整内核模块列表 | `lsmod` |
+| 内核版本与编译选项 | `uname -a`、`/boot/config-*` 或 `/proc/config.gz` |
+| 内核 taint、Oops/Panic | `/proc/sys/kernel/tainted`、`dmesg` |
+| 活跃内核线程、THP defrag | `ps`、THP sysfs |
+| irqbalance / oenetcls / SMC / ism 模块 | `systemctl`、`lsmod`、`modinfo` |
+| ARM SPE 支持、debugfs 挂载 | `perf list`、`mount` |
+| 文件系统、SECCOMP、fd Top5、关键服务 PID | `/proc/filesystems`、`/proc/*/status`、`pgrep` |
+
+## process_detail_info.txt — 进程/线程详细信息
+
+脚本函数: `collect_process_detail_info`（Phase 3）
+
+| 采集项 | 采集方式 |
+|--------|---------|
+| 系统进程/线程总数、状态分布 | `ps` |
+| pidstat CPU/内存/IO 采样 | `pidstat -u/-r/-d` |
+| 线程级 CPU 统计 | `pidstat -t -u` |
+| 线程最多的进程 Top 10 | `ps --sort=-nlwp` |
+| Top CPU 进程线程详情 | `/proc/<pid>/task` |
+| /proc/schedstat、PID/线程上限 | `/proc/schedstat`、`pid_max`、`threads-max` |
+| 关键进程检查（redis-server） | `pgrep` |
+| 线程生命周期轮询（创建/销毁事件） | `/proc/<pid>/task` 快照对比，持续 DURATION 秒 |
+
+## container_info.txt — 容器资源监控
+
+脚本函数: `collect_container_info`（Phase 3）
+
+| 采集项 | 采集方式 |
+|--------|---------|
+| cgroup 版本检测 | `/sys/fs/cgroup` |
+| 容器发现（docker/containerd/libpod/kubepods） | cgroup 目录扫描 |
+| CPU 限额与可用 CPU 数 | `cpu.max` / `cpu.cfs_*` |
+| CPU 累计使用 | `cpu.stat` / `cpuacct.usage` |
+| NUMA/CPU 亲和性 | `cpuset.*` |
+| 内存配置与使用 | `memory.max` / `memory.limit_in_bytes` |
+| blkio 限速 | `io.max` / `blkio.throttle.*` |
+| 任务列表（TID 映射） | cgroup tasks/threads |
+| Docker 元数据 | `docker inspect` |
+| 容器 CPU 多采样观测 | cgroup 配额/usage 采样，持续 DURATION 秒 |
+
+## memory_metrics_analysis.txt — 内存指标深度分析
+
+脚本函数: `collect_mem_metrics`（Phase 1）
+
+| 采集项 | 采集方式 |
+|--------|---------|
+| 内存压力 PSI | `/proc/pressure/mem` |
 | 内存使用概览 | `free -h` |
-| 虚拟内存、交换区、块 I/O 动态统计 | `vmstat -w -t 1 5` |
-| 系统内存页大小 | `getconf PAGE_SIZE` |
-| 大页 (HugePages) 配置 | `/proc/meminfo`、`/sys/kernel/mm/hugepages/` |
-| 交换区详情 | `/proc/swaps`、`swapon --show` |
-| NUMA 节点内存分布 | `/sys/devices/system/node/node*/meminfo`、`numactl --hardware` |
-| 进程内存占用 Top 15 | `ps -eo pid,comm,rss,vsz --sort=-rss` |
-| PSI 内存压力 | `/proc/pressure/memory` |
+| OOM 统计、Swap 配置 | `/proc/vmstat`、`swapon -s` |
+| Slab/Vmalloc 信息 | `/proc/slabinfo`、`/proc/meminfo` |
+| 分配/回收统计 | `/proc/vmstat`（pgfault/pgalloc/pgscan 等） |
+| 大页配置（静态+透明） | `/proc/meminfo`、THP sysfs、hugepages sysfs |
+| OOM 配置、KSM、NUMA balancing | sysctl、KSM sysfs |
+| 内存 cgroup 限额 | `/sys/fs/cgroup/memory.*` |
+| 内存水位线、Zone 信息 | `/proc/sys/vm/watermark*`、`/proc/zoneinfo` |
+| jemalloc 检测、MALLOC 环境变量 | `/proc/<pid>/maps`、env |
+| NUMA 统计（系统级+进程级） | `/proc/vmstat`、`numastat -p` |
+| NUMA 布局、Buddy Info | `numactl --hardware`、`lscpu`、`/proc/buddyinfo` |
+| 近期 OOM 事件 | `dmesg` / `journalctl -k` |
+| 完整 meminfo/vmstat、页大小、每节点内存 | `/proc/meminfo`、`/proc/vmstat`、`getconf`、node sysfs |
 
-## io → 报告 `io-collection_report.txt`
+## network_metrics_analysis.txt — 网络指标深度分析
 
-脚本: `scripts/collect_io_info.sh`
-
-| 采集项 | 采集方式 |
-|--------|---------|
-| 块设备列表与类型 | `lsblk` |
-| 磁盘调度器与队列参数 | `/sys/block/<dev>/queue/` |
-| /proc/diskstats 原始数据 | `/proc/diskstats` |
-| 磁盘挂载与使用率 | `df -h` |
-| vmstat 初始采样 | `vmstat 1 1` |
-| iostat 扩展统计 (单次+持续) | `iostat -x 1 1` + `iostat -x 1 N` |
-| pidstat 进程 I/O | `pidstat -d 1 N` |
-
-## net → 报告 `net-collection_report.txt`
-
-脚本: `scripts/collect_net_info.sh`
+脚本函数: `collect_net_metrics`（Phase 2）
 
 | 采集项 | 采集方式 |
 |--------|---------|
-| 网络接口名称、状态 (UP/DOWN)、索引 | `/sys/class/net/<iface>/` |
-| 网络接口简表 | `ip -o link show` + `ip link show \| paste -sd '#'` |
-| 网卡驱动详情 (版本、固件等) | `ethtool -i <iface>` |
-| 网卡队列信息 (RX/TX 队列数、RPS) | `/sys/class/net/<iface>/queues/` |
-| 网络接口 IP 配置 | `ip addr show` |
-| 路由表 | `ip route show` |
-| ARP 表 | `arp -n` / `/proc/net/arp` |
-| 网络统计 (retrans, 丢包等) | `netstat -s` |
-| TCP/UDP 连接状态 | `ss -s`, `ss -tan` |
-| 网卡中断亲和性 | `/proc/irq/*/smp_affinity` |
-| /proc/net/dev 原始统计 | `/proc/net/dev` |
-| 网络设备统计 (sar) | `sar -n DEV` |
-| 网络设备错误 (sar) | `sar -n EDEV` |
-| eBPF 进程间流量亲和性 | `python3 scripts/collect_net_ebpf_traffic.py [BATCH_DIR] -d 30` |
-| eBPF 线程队列分布 | `python3 scripts/collect_net_ebpf_queue.py [BATCH_DIR] -d 30` |
+| 网络接口列表 | `ip -br link show` |
+| 网络 sysctl 配置 | `/proc/sys/net/ipv4/*`、`/proc/sys/net/core/*` |
+| 网卡链路/驱动/队列/Ring/Coalesce/Pause/Offload | `ethtool` |
+| 网卡 IRQ 亲和性 | `/proc/interrupts`、`/proc/irq/*/smp_affinity` |
+| 网络设备统计/错误统计 | `sar -n DEV/EDEV`（持续 DURATION 秒） |
+| 网关/回环延迟 | `ping` |
+| TCP 统计、Socket 概览 | `netstat -s`、`ss -s` |
+| Socket 内存、连接状态分布 | `/proc/net/sockstat`、`ss -tan` |
+| 网络队列统计 | `/proc/net/netstat`（TcpExt/IpExt） |
+| 接口详细状态、IP/路由/ARP | `/sys/class/net/*`、`ip addr/route`、`arp` |
+| 监听端口 | `ss -tlnp` |
+| 队列/RPS 配置、ntuple 支持 | `/sys/class/net/*/queues`、`ethtool -k` |
+| 排队规则、设备统计、进程名列表 | `tc qdisc show`、`/proc/net/dev`、`ps` |
 
-## process → 报告 `process-collection_report.txt`
+## io_metrics_analysis.txt — I/O 指标深度分析
 
-脚本: `scripts/collect_process_info.sh`
+脚本函数: `collect_io_metrics`（Phase 2）
 
 | 采集项 | 采集方式 |
 |--------|---------|
-| 系统负载 | `/proc/loadavg` |
-| 进程状态分布 (R/S/D/Z/T/I) | `ps -eo stat` |
-| 进程 CPU 统计 | `pidstat -u 1 5` |
-| 进程内存统计 | `pidstat -r 1 1` |
-| 进程 I/O 统计 | `pidstat -d 1 1` |
-| 线程级 CPU 统计 | `pidstat -t -u 1 3` |
-| 上下文切换统计 | `pidstat -w 1 1` |
-| Top CPU 进程排行 | `ps -eo pid,comm,%cpu,%mem,rss,vsz --sort=-%cpu` |
-| 线程最多的进程 Top 10 | `ps -eo pid,comm,nlwp --sort=-nlwp` |
-| 指定进程线程详情 | `/proc/<pid>/task/` |
-| eBPF 线程创建/销毁事件 | `python3 scripts/collect_process_ebpf_thread.py [BATCH_DIR] -d 30` |
+| 系统概览（内核/CPU/内存） | `uname`、`nproc`、`free` |
+| 磁盘设备列表、IO 调度器与队列参数 | `lsblk`、`/sys/block/*/queue/*` |
+| 内存/页缓存设置 | `/proc/sys/vm/*`（dirty 系列等） |
+| 进程 IO 优先级/统计/文件限制 | `ionice`、`/proc/<pid>/io`、`/proc/<pid>/limits` |
+| 系统级 IO 限制（AIO/文件句柄） | `/proc/sys/fs/aio-*`、`file-max`、`file-nr` |
+| 实时性能数据 | `vmstat`、`iostat -x`（持续 DURATION 秒） |
+| 文件系统/NFS/CIFS 挂载选项 | `mount` |
 
-## process-thread-poll → 报告 `process-thread-poll_report.txt` (可选)
+## hotspot_analysis.txt — 热点函数分析（需 -p）
 
-脚本: `scripts/collect_process_thread_poll.sh`
+脚本函数: `collect_hotspot_analysis`（Phase 4）
 
 | 采集项 | 采集方式 |
 |--------|---------|
-| 线程创建/销毁轮询 (eBPF 降级方案) | 轮询 `/proc/<pid>/task/` 快照对比 |
+| 进程热点采样（30 秒） | `perf record -p <PID> -g` |
+| 热点函数报告 | `perf report --stdio --percent-limit 1` |
 
-## system → 报告 `system-collection_report.txt`
+## syscall_analysis.txt — 系统调用分析（需 -p）
 
-脚本: `scripts/collect_system_sar.sh`
-
-| 采集项 | 采集方式 |
-|--------|---------|
-| 内核版本、启动时间、虚拟化检测 | `uname -r`, `uptime`, `systemd-detect-virt` |
-| CPU 使用率 (sar) | `sar -u` |
-| 每核心 CPU (sar) | `sar -P ALL` |
-| 内存使用 (sar) | `sar -r` |
-| 交换区 (sar) | `sar -S` |
-| 分页统计 (sar) | `sar -B` |
-| I/O 速率 (sar) | `sar -b` |
-| Socket 统计 (sar) | `sar -n SOCK` |
-| 系统负载与队列 (sar) | `sar -q` |
-| 上下文切换 (sar) | `sar -w` |
-| 大页使用 (sar) | `sar -H` |
-| 中断统计 (sar) | `sar -I SUM` |
-| TTY 设备活动 (sar) | `sar -y` |
-| sysstat 历史数据 | `sadf -d /var/log/sa/saDD` |
-| PSI CPU/IO 压力指标 | `/proc/pressure/cpu`、`/proc/pressure/io` |
-
-> 注: 网络设备统计 (`sar -n DEV`/`sar -n EDEV`) 已归入 net 采集项，不在 system 中重复采集。
-
-## kernel → 报告 `kernel-collection_report.txt`
-
-脚本: `scripts/collect_kernel_config.sh`
+脚本函数: `collect_syscall_analysis`（Phase 4）
 
 | 采集项 | 采集方式 |
 |--------|---------|
-| 全量内核运行时参数 | `sysctl -a` (同时缓存至 `sysctl_cache.txt`) |
-| 关键内核参数分组提取 (网络/内存/调度/FS/用户) | 从缓存 grep 分组 |
-| 内核启动参数与特征 | `/proc/cmdline` |
-| 内核模块列表 | `lsmod` |
-| 内核版本与构建配置 | `uname -a`, `/proc/version`, `/boot/config-*` |
-| taint、dmesg 错误 | 多源 |
-| 内核线程、挂载点、THP、KSM、filesystems | 多源 |
+| 系统调用汇总统计 | `strace -p <PID> -c -f`（持续 DURATION 秒） |
 
-## container → 报告 `container-collection_report.txt`
+## pmu_info.txt — PMU 远程访问与 HHA 分析（仅 aarch64）
 
-脚本: `scripts/collect_container_info.sh`
+脚本函数: `collect_pmu_info`（Phase 4）
 
 | 采集项 | 采集方式 |
 |--------|---------|
-| 运行中容器列表 | 遍历 cgroup + `docker ps -q` 辅助 |
-| 容器 CPU 限额与累计使用 | cpu/cpuacct cgroup |
-| 容器 CPU/内存亲和性 | cpuset cgroup |
-| 容器内存限额与使用 | memory cgroup |
-| 容器 blkio 限速与累计 | blkio cgroup |
-| 容器任务列表 (TID→PID 映射) | cpu cgroup tasks |
-| 容器元数据 (名称、镜像、标签) | `docker inspect` |
-| Docker Daemon 信息 | `docker info` |
-
-## pmu → 报告 `pmu-collection_report.txt`
-
-脚本: `scripts/collect_pmu_info.sh`
-
-| 采集项 | 采集方式 |
-|--------|---------|
-| HHA 设备检测 | `ls -d /sys/devices/hha*` |
-| NUMA 远程访问 PMU 事件列表 | `perf list | grep -iE 'hha|rx_ops|rx_outer|rx_sccl|uncore'` |
-| 内存访问压力统计 | `perf stat -e <events> -a sleep 10` |
-| 每秒操作速率与远程访问占比 | awk 换算 |
+| HHA 设备检测 | `/sys/devices/hha*` |
+| PMU 事件列表（rx_ops/rx_outer/rx_sccl/uncore） | `perf list` |
+| 远程访问统计 | `perf stat -e rx_ops -e rx_outer -e rx_sccl`（持续 DURATION 秒） |
+| 速率与远程访问占比计算 | 基于 perf stat 结果 |
+| perf list 输出预览 | `perf list` |
