@@ -60,10 +60,13 @@ extract_steal_info() {
 
     # STEAL_VERSION: 通过 sched_max_steal_count 判断内核版本
     # 能正常输出值 → 旧版本；报错 "unknown key" → 新版本
+    # 修复: 错误信息实际格式为
+    #   "sysctl: cannot stat /proc/sys/kernel/sched_max_steal_count: No such file or directory"
+    # 即 "sched_max_steal_count" 出现在错误关键字之后，之前的 regex 顺序错了
     local steal_version="未知"
-    if grep -qE 'sched_max_steal_count.*error|sched_max_steal_count.*unknown key|sched_max_steal_count.*不允许' "$kfile" 2>/dev/null; then
+    if grep -qE '(cannot stat|No such file|unknown key|不允许).*sched_max_steal_count' "$kfile" 2>/dev/null; then
         steal_version="新版本"
-    elif grep -qE 'sched_max_steal_count[=:]\s*[0-9]+' "$kfile" 2>/dev/null; then
+    elif grep -qE 'sched_max_steal_count[=:][[:space:]]*[0-9]+' "$kfile" 2>/dev/null; then
         steal_version="旧版本"
     fi
 
@@ -112,27 +115,35 @@ extract_cpu_metrics() {
         # 用 awk 状态跟踪跳过 === SAMPLE 块（sed 的 /^=== / 终止模式会误匹配 SAMPLE 标题行）
         proc_stat_section=$(awk '
             /\/proc\/stat.*多采样/            { in_section=1; next }
-            in_section && /^=== / && !/^=== SAMPLE/ { exit }
+            in_section && /^=== \/(proc|mp)/  { exit }
             in_section                        { print }
         ' "$cpu_source" 2>/dev/null || true)
+        # 如果主数据源没有 /proc/stat 数据，尝试从 cpu_detail_info.txt 读取
+        if [[ -z "$proc_stat_section" && "$cpu_source" != "$cfile" && -f "$cfile" ]]; then
+            proc_stat_section=$(awk '
+                /\/proc\/stat.*多采样/            { in_section=1; next }
+                in_section && /^=== \/(proc|mp)/  { exit }
+                in_section                        { print }
+            ' "$cfile" 2>/dev/null || true)
+        fi
         if [[ -z "$proc_stat_section" ]]; then
             proc_stat_section=$(awk '
                 /\/proc\/stat/                { in_section=1; next }
-                in_section && /^=== / && !/^=== SAMPLE/ { exit }
+                in_section && /^=== \/(proc|mp)/  { exit }
                 in_section                    { print }
             ' "$cpu_source" 2>/dev/null || true)
         fi
         if [[ -n "$proc_stat_section" ]]; then
             # 取两次采样的 cpu 行差值
-            local -a cpu_samples
+            declare -a cpu_samples
             while IFS= read -r line; do
                 if [[ "$line" =~ ^cpu\  ]]; then
                     cpu_samples+=("$line")
                 fi
             done <<< "$proc_stat_section"
-            if ((${#cpu_samples[@]} >= 2)); then
-                local s1=(${cpu_samples[-2]})
-                local s2=(${cpu_samples[-1]})
+            if [[ ${#cpu_samples[@]} -ge 2 ]]; then
+                local s1=(${cpu_samples[${#cpu_samples[@]}-2]})
+                local s2=(${cpu_samples[${#cpu_samples[@]}-1]})
                 local delta_total=0 delta_idle=0
                 local i
                 for ((i=1; i<${#s1[@]}; i++)); do
@@ -150,7 +161,7 @@ extract_cpu_metrics() {
     # ---- CPU_IMBALANCE ----
     # 从各核心 Average 行计算 max - min
     # 仅匹配 "Average: <数字>" 的数据行（排除 "Average: all" 和注释/标题行）
-    local -a core_usage=()
+    declare -a core_usage=()
     while IFS= read -r line; do
         local core_id
         core_id=$(echo "$line" | awk '{print $2}')
@@ -165,7 +176,7 @@ extract_cpu_metrics() {
         fi
     done < <(grep -E '^Average:[[:space:]]+[0-9]+' "$cpu_source" 2>/dev/null || true)
 
-    if ((${#core_usage[@]} >= 2)); then
+    if [[ ${#core_usage[@]} -ge 2 ]]; then
         local max_use=0 min_use=100
         for u in "${core_usage[@]}"; do
             if (( $(awk "BEGIN {print ($u > $max_use) ? 1 : 0}") )); then
@@ -239,6 +250,32 @@ main() {
     local cpu_usage cpu_imbalance cs_rate
     read -r cpu_usage cpu_imbalance cs_rate <<< "$(extract_cpu_metrics "$DATA_DIR")"
 
+    # ---- NUMA 节点数 ----
+    # 修复: 之前 `grep -c || echo "1"` 在 grep 无匹配（退出码 1）时追加 "1"，
+    #       导致 numa_nodes="0\n1" 出现非法 JSON
+    #       改用 `|| true` 阻止 echo，然后显式回退到 1
+    local numa_nodes=1
+    if [[ -f "${DATA_DIR}/static_info.txt" ]]; then
+        numa_nodes=$(grep -c '^node [0-9]' "${DATA_DIR}/static_info.txt" 2>/dev/null || true)
+    fi
+    # 若 static_info 没有，回退到 cpu_detail_info.txt 的 NUMA 节点
+    if [[ -z "$numa_nodes" || "$numa_nodes" == "0" ]] && [[ -f "${DATA_DIR}/cpu_detail_info.txt" ]]; then
+        numa_nodes=$(grep -oE 'NUMA node\(s\):[[:space:]]+[0-9]+' "${DATA_DIR}/cpu_detail_info.txt" 2>/dev/null | head -1 | grep -oE '[0-9]+$' || echo "")
+    fi
+    numa_nodes=${numa_nodes:-1}
+    [[ "$numa_nodes" == "0" ]] && numa_nodes=1
+
+    # ---- 容器数 ----
+    # 修复: 之前 grep -o "--- CONTAINER ---" 会因为 --- 被当成 grep 选项而报错
+    #       改用 grep -- "--- CONTAINER ---" 显式终止选项解析
+    #       另外 grep -c 无匹配时退出 1 触发 `|| echo 0` 追加，导致 container_count="0\n0"
+    #       改用 `|| true` 阻止回退
+    local container_count=0
+    if [[ -f "${DATA_DIR}/container_info.txt" ]]; then
+        container_count=$(grep -c -e '--- CONTAINER ---' "${DATA_DIR}/container_info.txt" 2>/dev/null || true)
+    fi
+    container_count=${container_count:-0}
+
     # ---- 构建 JSON ----
     cat > "$JSON_FILE" <<EOF
 {
@@ -249,7 +286,9 @@ main() {
   "steal_version": "$(json_escape "$steal_version")",
   "cpu_usage": ${cpu_usage:-0},
   "cpu_imbalance": ${cpu_imbalance:-0},
-  "cs_rate": ${cs_rate:-0}
+  "cs_rate": ${cs_rate:-0},
+  "numa_nodes": ${numa_nodes:-1},
+  "container_count": ${container_count:-0}
 }
 EOF
 
