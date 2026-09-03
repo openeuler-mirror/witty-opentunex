@@ -54,9 +54,17 @@ extract_hotspot_info() {
         is_nf_hook_hotspot=true
         # 提取命中的 nf_hook 函数名（去重）
         nf_hook_funcs=$(grep -oiE 'nf_hook[a-zA-Z0-9_]*' "$hfile" 2>/dev/null | sort -u | tr '\n' ',' | sed 's/,$//')
-        # 提取占比百分比（perf report 的 Overhead 列）
+        # 提取占比百分比：兼容 graph view（--X.XX%--nf_hook）与表格视图（独立 Overhead 列）两种格式
         local pct=""
-        pct=$(grep -iE 'nf_hook' "$hfile" 2>/dev/null | head -1 | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+%?$/ || $i ~ /^[0-9]+%?$/){print $i; break}}' | sed 's/%//' || true)
+        # 方案 1：graph view 行内正则 --X.XX%--nf_hook*
+        pct=$(grep -oiE -- '--[0-9]+\.[0-9]+%--nf_hook' "$hfile" 2>/dev/null \
+              | grep -oE '[0-9]+\.[0-9]+' | sort -rn | head -1 || true)
+        # 方案 2：表格视图，按空格分列的 Overhead 列
+        if [[ -z "$pct" ]]; then
+            pct=$(grep -iE 'nf_hook' "$hfile" 2>/dev/null | head -1 \
+                  | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+%?$/ || $i ~ /^[0-9]+%?$/){print $i; break}}' \
+                  | sed 's/%//' || true)
+        fi
         if [[ -n "$pct" ]]; then
             nf_hook_percent="$pct"
         fi
@@ -101,7 +109,9 @@ extract_net_info() {
         cgroup_path="/sys/fs/cgroup"
     fi
 
-    # 监听端口：从网络信息或进程信息中提取
+    # 监听端口：只取常见服务（redis/mysql/postgres/nginx/httpd/memcached/etcd）对应的端口
+    #   方案 1：ss/netstat 的 LISTEN 行里按进程名白名单过滤，提取真实端口
+    #   方案 2：若 LISTEN 段缺失/无匹配，按进程名映射到该服务的默认端口
     local pfile=""
     if [[ -f "${data_dir}/process_detail_info.txt" ]]; then
         pfile="${data_dir}/process_detail_info.txt"
@@ -109,9 +119,65 @@ extract_net_info() {
         pfile="${data_dir}/process_info.txt"
     fi
 
-    if [[ -n "$pfile" ]]; then
-        # 提取常见服务端口（redis:6379, mysql:3306 等）
-        listen_ports=$(grep -oiE '(redis|mysql|postgres|nginx|httpd|memcached|etcd)[^[:space:]]*' "$pfile" 2>/dev/null | head -5 | tr '\n' ',' | sed 's/,$//' || true)
+    # 常见服务的进程名白名单（POSIX awk 兼容写法，用 | 分隔）
+    local svc_procs='redis-server|redis-sentinel|mysqld|mariadbd|postgres|postmaster|nginx|httpd|apache2|memcached|etcd'
+
+    # 方案 1：从 LISTEN 行同时提取 :PORT 与 users:(("PROC"), ...) 中的进程名，按白名单过滤
+    local nfile=""
+    if [[ -f "${data_dir}/network_metrics_analysis.txt" ]]; then
+        nfile="${data_dir}/network_metrics_analysis.txt"
+    elif [[ -f "${data_dir}/net_info.txt" ]]; then
+        nfile="${data_dir}/net_info.txt"
+    fi
+
+    if [[ -n "$nfile" ]]; then
+        listen_ports=$(awk -v wl="$svc_procs" '
+            /LISTEN/ {
+                port = ""; proc = ""
+                # 提取 :PORT（第一个 2~5 位端口号）
+                if (match($0, /:([0-9]{2,5})/)) {
+                    s = substr($0, RSTART+1, RLENGTH-1)
+                    if (s ~ /^[0-9]+$/) port = s
+                }
+                # 提取进程名：找 users:(("..." 内部的非引号段
+                i = index($0, "users:((\"")
+                if (i > 0) {
+                    rest = substr($0, i + 9)        # 跳过 users:(("
+                    j = index(rest, "\"")           # 找下一个 "
+                    if (j > 0) proc = substr(rest, 1, j - 1)
+                }
+                # 进程名是否在白名单内：用 | 包裹 + index 做精确包含匹配
+                if (port != "" && proc != "") {
+                    if (index("|" wl "|", "|" proc "|") > 0) {
+                        print port
+                    }
+                }
+            }
+        ' "$nfile" 2>/dev/null | sort -un | tr '\n' ',' | sed 's/,$//' || true)
+    fi
+
+    # 方案 2：兜底——按进程名映射常见服务的默认端口
+    if [[ -z "$listen_ports" && -n "$pfile" ]]; then
+        local -A port_map=(
+            [redis-server]=6379
+            [redis-sentinel]=26379
+            [mysqld]=3306
+            [mariadbd]=3306
+            [postgres]=5432
+            [postmaster]=5432
+            [nginx]=80
+            [httpd]=80
+            [apache2]=80
+            [memcached]=11211
+            [etcd]=2379
+        )
+        local proc port
+        for proc in "${!port_map[@]}"; do
+            if grep -qE "\b${proc}\b" "$pfile" 2>/dev/null; then
+                port="${port_map[$proc]}"
+                listen_ports="${listen_ports:+$listen_ports,}$port"
+            fi
+        done
     fi
 
     echo "$(json_escape "$net_dev_name") $(json_escape "$cgroup_path") $(json_escape "$listen_ports")"
@@ -137,10 +203,16 @@ extract_kernel_info() {
         return
     fi
 
-    # 内核版本
-    kernel_version=$(grep -iE '^\s*kernel:|^\s*Kernel Release:' "$kfile" 2>/dev/null | head -1 | sed 's/^[[:space:]]*[Kk]ernel[[:space:]]*\(Release\)\?:[[:space:]]*//I' | sed 's/[[:space:]]*$//' || true)
+    # 内核版本：优先匹配 "Linux version X.Y.Z" 或 "kernel.osrelease = X.Y.Z"
+    kernel_version=$(grep -oE 'Linux version [0-9]+\.[0-9]+\.[0-9a-zA-Z_.-]+' "$kfile" 2>/dev/null | head -1 | sed 's/^Linux version //' || true)
     if [[ -z "$kernel_version" ]]; then
-        kernel_version=$(uname -r 2>/dev/null || echo "unknown")
+        kernel_version=$(grep -oE 'kernel\.osrelease\s*=\s*[0-9]+\.[0-9]+\.[0-9.-]+' "$kfile" 2>/dev/null | head -1 | sed 's/^kernel\.osrelease\s*=\s*//' || true)
+    fi
+    if [[ -z "$kernel_version" ]]; then
+        kernel_version=$(grep -iE '^\s*kernel:|^\s*Kernel Release:' "$kfile" 2>/dev/null | head -1 | sed 's/^[[:space:]]*[Kk]ernel[[:space:]]*\(Release\)\?:[[:space:]]*//I' | sed 's/[[:space:]]*$//' || true)
+    fi
+    if [[ -z "$kernel_version" ]]; then
+        kernel_version="unknown"
     fi
 
     # hisock 支持：检查内核配置 CONFIG_HISOCK=y
@@ -174,15 +246,15 @@ main() {
     read -r net_dev_name cgroup_path listen_ports <<< "$(extract_net_info "$DATA_DIR")"
 
     # ---- 从 kernel_config_info.txt 提取内核特性支持 ----
-    local is_hisock_supported kernel_version
+    local is_hisock_supported=false kernel_version="unknown"
     read -r is_hisock_supported kernel_version <<< "$(extract_kernel_info "$DATA_DIR")"
 
     # ---- 构建 JSON ----
     cat > "$JSON_FILE" <<EOF
 {
   "is_nf_hook_hotspot": ${is_nf_hook_hotspot},
-  "nf_hook_funcs": "$(json_escape "$nf_hook_funcs")",
-  "nf_hook_percent": ${nf_hook_percent},
+  "nf_hook_funcs": "$(json_escape "${nf_hook_funcs:-}")",
+  "nf_hook_percent": ${nf_hook_percent:-0},
   "net_dev_name": "$(json_escape "$net_dev_name")",
   "cgroup_path": "$(json_escape "$cgroup_path")",
   "listen_ports": "$(json_escape "$listen_ports")",

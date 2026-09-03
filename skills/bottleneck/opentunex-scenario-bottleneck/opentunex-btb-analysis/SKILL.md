@@ -13,7 +13,7 @@ description: "BTB(分支目标缓冲) / TidCMP 适用性分析。检查 CPU 型�
 
 ## 强制约束
 
-> 本技能遵守 [场景分析子技能共享约束](../common-constraints.md) 中定义的所有执行约束和数据目录约定。
+> 本技能遵守 [场景分析子技能共享约束](../references/common-constraints.md) 中定义的所有执行约束和数据目录约定。
 >
 > 本技能的数据目录名为 `opentunex-btb-analysis_collect`。
 
@@ -27,6 +27,16 @@ description: "BTB(分支目标缓冲) / TidCMP 适用性分析。检查 CPU 型�
 
 本技能**禁止自行采集数据**，数据缺失时在结果中标注 `DATA_MISSING`，由协调器决定是否触发补充采集。
 
+### 执行模式与 `${WORK_DIR}` 语义（核心）
+
+- 输入契约携带 `execution_context`（`execution_mode` / `user` / `ip`）。**远端模式**（execution_mode=remote）：`${WORK_DIR}` 与 `${DATA_DIR}` 都是**远端服务器上**的路径：
+  - `scripts/preanalysis.sh` 远端执行**必须加载并遵循 `opentunex-remote-execution` skill 的执行方式**（`ssh -q ${user}@${ip} "mkdir -p /tmp/opentunex-btb-analysis/"` → scp 上传脚本到远端 `scp scripts/preanalysis.sh ${user}@${ip}:/tmp/opentunex-btb-analysis/` → 远端执行`ssh -q -tt ${user}@${ip} "bash /tmp/opentunex-btb-analysis/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-btb-analysis_collect"`；session 超时按该 skill 扩展为 1200 秒；**禁止**读取脚本内容后自行合成命令代替执行。**禁止**在 agent 本地执行该脚本或读写本地 `${DATA_DIR}` 路径
+  - 读取 `${DATA_DIR}` 下的数据文件：`ssh -q ${user}@${ip} "cat <文件>"` 流回上下文分析，**禁止** scp 拷回本地
+  - 写入 result.md / 输出契约到 `${WORK_DIR}/analysis/...`：**直接在远端机器上产出**——经 ssh 在远端落盘（`ssh ${user}@${ip} "mkdir -p <目录> && cat > <文件>"`，heredoc 写入内容）；**禁止**先在 agent 本地生成文件再 scp 上传、**禁止**在 agent 本地创建 `${WORK_DIR}` 目录
+  - 本技能输出的调优/使能命令（echo > /sys/...、tune 脚本调用等）仅作为报告建议，**不执行**；用户确认后由用户在远端服务器上执行
+- **本地模式**（execution_mode=local）：脚本与命令直接本地执行。
+- 具体写法见 `opentunex-remote-execution` skill（含其 `references/work_dir_remote_semantics.md`）。
+
 ---
 
 ## 执行流程
@@ -35,25 +45,27 @@ description: "BTB(分支目标缓冲) / TidCMP 适用性分析。检查 CPU 型�
 
 | 步骤 | 操作 | 产出 |
 |------|------|------|
-| 1 | 执行 `../../scripts/opentunex-btb-analysis/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-btb-analysis_collect` | `preanalysis.json` |
-| 2 | 读取 `preanalysis.json`，按"字段→决策变量映射"表提取决策变量 | 决策变量值 |
+| 1 | 执行 `scripts/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-btb-analysis_collect`（本地模式直接执行；远端模式按 `opentunex-remote-execution` skill 执行方式先 `ssh -q ${user}@${ip} "mkdir -p /tmp/opentunex-btb-analysis/"`，然后 `scp scripts/preanalysis.sh ${user}@${ip}:/tmp/opentunex-btb-analysis/` 再 `ssh -q -tt ${user}@${ip} "bash /tmp/opentunex-btb-analysis/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-btb-analysis_collect"`，`preanalysis.json` 生成在**远端**输出目录，禁止在 agent 本地执行） | `preanalysis.json` |
+| 2 | 读取 `preanalysis.json`，按"字段→决策变量映射"表提取决策变量（远端模式：`ssh -q ${user}@${ip} "cat ${DATA_DIR}/opentunex-btb-analysis_collect/preanalysis.json"` 流回上下文；**禁止**在 agent 本地用 Read 工具读取 `${DATA_DIR}` 路径） | 决策变量值 |
 | 3 | 按"决策逻辑"章节依次执行环境约束前置检查 → 场景模式判定 | 分析结论 |
 | 4 | 按"产出"章节模板，将决策结果写入 `${WORK_DIR}/analysis/opentunex-btb-analysis_collect/result.md` | 完整分析报告（含结构化数据 JSON） |
 | 5 | 按"契约输出"章节格式写入输出契约 YAML 文件 | 契约文件 |
 
-> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。
+> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。**远端模式**下 `preanalysis.json` 生成在远端服务器输出目录 `${DATA_DIR}/opentunex-btb-analysis_collect/`，步骤 2 必须经 ssh `cat` 流回上下文读取，**禁止**在 agent 本地目录查找或读取该文件。步骤 1 为强制预解析模式：仅当步骤 1 执行失败或 `preanalysis.json` 不存在时按 SB-04 标注 `DATA_MISSING` 处理，**禁止**跳过步骤 1 直接读取原始数据文件。**预解析模式下禁止直接读取 `scripts/preanalysis.sh` 脚本内容**（不得 Read/cat 脚本文件本身）：本地模式直接执行脚本；远端模式按 `opentunex-remote-execution` skill 执行方式 scp 上传脚本文件到远端后 ssh 执行，无需阅读脚本实现。
 
 ---
 
 ## 数据读取
 
-### 优先路径：预分析 JSON（推荐）
+### 预解析模式（强制首选）：预分析 JSON
 
-1. 执行预处理脚本生成 JSON：
+> **强制**：必须先执行 `scripts/preanalysis.sh` 生成 `preanalysis.json` 并基于 JSON 分析，**禁止**跳过预解析直接读取原始数据文件。仅当预解析失败（脚本执行失败或 `preanalysis.json` 不存在，远端模式经 ssh 在远端确认）时，按 SB-04 标注 `DATA_MISSING` 处理（本技能无逐文件降级路径）。
+
+1. 执行预处理脚本生成 JSON（远端模式：按 `opentunex-remote-execution` skill 执行方式 scp 上传后 `ssh -q -tt` 在远端执行，见"输入约定"执行模式章节）：
    ```bash
-   bash ../../scripts/opentunex-btb-analysis/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-btb-analysis_collect
+   bash scripts/preanalysis.sh ${DATA_DIR} ${DATA_DIR}/opentunex-btb-analysis_collect
    ```
-2. 读取生成的 JSON 文件：`${DATA_DIR}/opentunex-btb-analysis_collect/preanalysis.json`
+2. 读取生成的 JSON 文件：`${DATA_DIR}/opentunex-btb-analysis_collect/preanalysis.json`（远端模式：`ssh -q ${user}@${ip} "cat ${DATA_DIR}/opentunex-btb-analysis_collect/preanalysis.json"` 流回上下文读取；**禁止**在 agent 本地用 Read 工具读取 `${DATA_DIR}` 路径、禁止 scp 拷回本地）
 
 #### preanalysis.json 字段 → 决策变量映射
 
@@ -92,17 +104,17 @@ description: "BTB(分支目标缓冲) / TidCMP 适用性分析。检查 CPU 型�
 
 > 当 S2 命中（redis/mysql 关键进程运行中，存在分支预测隔离瓶颈场景），但前置检查 E0/E1 已记录 `BTB_UNSUPPORTED_GAP`（非鲲鹏平台或非 920 新型号）时，**不得直接判为"不适用"**，改按下表输出：
 
-| 条件 | 输出结论 | applicability | suggestion | estimated_gain.severity |
-|------|---------|--------------|-----------|------------------------|
-| 场景匹配（S2 命中）且 `BTB_UNSUPPORTED_GAP` 非空 | 收益有限（环境不支持但场景匹配） | `limited_benefit` | `[当前硬件不支持（{BTB_UNSUPPORTED_GAP 具体原因}），需手动引入该特性后方可实施：更换为鲲鹏920新型号服务器，进入 BIOS → Advanced → Power And Performance Configuration → CPU PM Control → TidCMP → Disabled]` | `low` |
+| 条件 | 输出结论            | applicability | suggestion | estimated_gain.severity |
+|------|-----------------|--------------|-----------|------------------------|
+| 场景匹配（S2 命中）且 `BTB_UNSUPPORTED_GAP` 非空 | 不适用（环境不支持但场景匹配） | `not_applicable` | `[当前硬件不支持（{BTB_UNSUPPORTED_GAP 具体原因}），需手动引入该特性后方可实施：更换为鲲鹏920新型号服务器，进入 BIOS → Advanced → Power And Performance Configuration → CPU PM Control → TidCMP → Disabled]` | `low` |
 
-**综合结论示例**：`收益有限 — 当前 CPU 非鲲鹏920新型号，但 redis/mysql 关键进程运行中，可能存在分支预测隔离瓶颈，建议更换为鲲鹏920新型号服务器后在 BIOS 中禁用 TidCMP`
+**综合结论示例**：`不适用 — 当前 CPU 非鲲鹏920新型号，但 redis/mysql 关键进程运行中，可能存在分支预测隔离瓶颈，建议更换为鲲鹏920新型号服务器后在 BIOS 中禁用 TidCMP`
 
 ---
 
 ## 产出
 
-将分析结果写入 `${WORK_DIR}/analysis/opentunex-btb-analysis_collect/result.md`，格式如下：
+将分析结果写入 `${WORK_DIR}/analysis/opentunex-btb-analysis_collect/result.md`（远端模式：**直接在远端机器上产出该文件**——经 ssh 在远端落盘（`ssh ${user}@${ip} "mkdir -p <目录> && cat > <路径>"`，heredoc 写入内容）；**禁止**先在 agent 本地生成文件再 scp 上传、禁止在 agent 本地创建 `${WORK_DIR}` 目录），格式如下：
 
 ```markdown
 # BTB 适用性分析结果
@@ -180,7 +192,7 @@ description: "BTB(分支目标缓冲) / TidCMP 适用性分析。检查 CPU 型�
 
 ## 契约输出
 
-输出契约格式参见 [contract-spec.md](../contract-spec.md)，本技能特有字段：
+输出契约格式参见 [contract-spec.md](../references/contract-spec.md)，本技能特有字段：
 
 ```yaml
 skill_name: "opentunex-btb-analysis"
@@ -188,5 +200,5 @@ input:
   data_dir: "[actual DATA_DIR]"
 output:
   result_path: "[actual result_path]"
-constraints_acknowledged: [SB-01~SB-06]
+constraints_acknowledged: [SB-01~SB-07]
 ```

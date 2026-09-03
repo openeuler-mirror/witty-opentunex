@@ -41,7 +41,7 @@ extract_cpu_info() {
     fi
 
     if [[ -z "$sfile" ]]; then
-        echo "$is_kunpeng $(json_escape "$part_id") $is_920_new_model"
+        echo "$is_kunpeng $is_920_new_model $(json_escape "$part_id")"
         return
     fi
 
@@ -59,7 +59,7 @@ extract_cpu_info() {
         is_920_new_model=true
     fi
 
-    echo "$is_kunpeng $(json_escape "$part_id") $is_920_new_model"
+    echo "$is_kunpeng $is_920_new_model $(json_escape "$part_id")"
 }
 
 # 从 top_processes.txt 或 process_info.txt 提取: REDIS_RUNNING, MYSQL_RUNNING
@@ -108,11 +108,11 @@ main() {
     local JSON_FILE="${OUTPUT_DIR}/preanalysis.json"
 
     # ---- 从 static_info.txt / cpu_info.txt 提取 CPU 信息 ----
-    local is_kunpeng part_id is_920_new_model
-    read -r is_kunpeng part_id is_920_new_model <<< "$(extract_cpu_info "$DATA_DIR")"
+    local is_kunpeng=false part_id="" is_920_new_model=false
+    read -r is_kunpeng is_920_new_model part_id <<< "$(extract_cpu_info "$DATA_DIR")"
 
     # ---- 从 top_processes.txt / process_info.txt 提取关键进程 ----
-    local redis_running mysql_running
+    local redis_running=false mysql_running=false
     read -r redis_running mysql_running <<< "$(extract_process_info "$DATA_DIR")"
 
     # ---- 构建 JSON ----
