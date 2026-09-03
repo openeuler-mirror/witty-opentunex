@@ -1,210 +1,143 @@
 ---
 name: "opentunex-data-collection"
-description: "数据采集技能。直接调度各维度采集脚本（CPU/内存/IO/网络/进程/系统/内核/容器/PMU）执行系统数据采集，脚本输出直接落盘到报告文件。当用户提到 CPU 高、内存不足、磁盘慢、网络丢包、进程异常、系统基线、内核参数、容器资源、PMU 事件、NUMA 远程访问等关键词，或需要采集系统性能数据时，必须使用本技能。支持单项采集或全量采集。"
+description: "数据采集技能。唯一采集方式：执行 scripts/bottleneck_data_collector.sh 瓶颈分析专用采集脚本，产出瓶颈场景分析所需的 13 个数据文件。当用户提到 CPU 高、内存不足、磁盘慢、网络丢包、进程异常、性能瓶颈等关键词，或需要采集系统性能数据时，必须使用本技能。"
 ---
 
 # 数据采集技能
 
-直接调度采集脚本执行系统数据采集，脚本输出直接落盘到报告文件，本技能不读取或改写采集内容。
+本技能**只有一种采集模式**：调度执行 `scripts/bottleneck_data_collector.sh`。脚本输出直接落盘到数据文件，本技能不读取或改写采集内容。
 
-> 所有脚本位于 `scripts/` 目录下。完整约束见 [constraints-data-collection.md](references/constraints-data-collection.md)。
+> 采集产出的数据文件供 `opentunex-scenario-bottleneck` 各场景 preanalysis.sh 直接解析。完整约束见 [constraints-data-collection.md](references/constraints-data-collection.md)。
 
 ---
 
-## 远程执行场景（CRITICAL — 当目标为远端服务器时必读）
+## 采集执行：`bottleneck_data_collector.sh`
 
-**当采集目标为远端 Linux 服务器时，本技能必须与 `opentunex-remote-execution` 技能组合使用，禁止绕过脚本直接合成命令执行。**
+```bash
+# 默认采集方式，不指定PID
+bash scripts/bottleneck_data_collector.sh -d 10 -o ${WORK_DIR}/collect
+
+# 当明确有特定应用（mysql/redis 等）需要指定 PID 采集时：先用 pgrep 取一个**活跃** PID，
+# 再传给脚本。**严禁**把 pgrep 多行输出（master+worker、多实例、子进程）整列传进去——
+# 脚本已升级校验：含逗号的多 PID 会直接报错并退出。
+APP_PID=$(pgrep -a "$APP_NAME" | awk '$2!="Z" {print $1; exit}')
+[ -n "$APP_PID" ] && bash scripts/bottleneck_data_collector.sh -d 10 -p "$APP_PID" -o ${WORK_DIR}/collect
+```
+
+| 参数 | 说明 | 必填 |
+|------|------|------|
+| `-d <秒>` | 采集持续时间 | 是（除非 -C/-h） |
+| `-p <PID>` | 监控进程 ID，**仅传一个活跃 PID**（禁止逗号分隔）；热点/系统调用分析必需 | 否 |
+| `-o <目录>` | 输出目录，${WORK_DIR}/collect | 否 |
+| `-c <项目>` | 采集项目，逗号分隔；默认全部 | 否 |
+| `-C` | 仅前置检查，不执行采集 | 否 |
+| `-h` | 显示帮助信息 | 否 |
+
+### 输出数据文件
+
+写入 `-o` 指定目录，值为${WORK_DIR}/collect：
+
+| 文件 | 内容 |
+|------|------|
+| `static_info.txt` | 硬件规格、OS版本、内核参数、调度特性 |
+| `global_bottleneck.txt` | CPU/内存/IO/网络全局瓶颈指标 |
+| `top_processes.txt` | 顶级资源消耗进程列表 |
+| `cpu_detail_info.txt` | CPU 深度信息（/proc/stat 多采样等） |
+| `kernel_config_info.txt` | 内核配置、调度特性、模块 |
+| `process_detail_info.txt` | 进程/线程详情、线程生命周期轮询 |
+| `container_info.txt` | 容器资源监控（CPU/内存/IO 配额） |
+| `memory_metrics_analysis.txt` | 内存深度分析（NUMA/缺页/Swap） |
+| `network_metrics_analysis.txt` | 网络深度分析（网卡配置/IRQ/tcp） |
+| `io_metrics_analysis.txt` | I/O 深度分析（调度器/队列/挂载） |
+| `hotspot_analysis.txt` | 热点函数分析（perf，需 -p） |
+| `syscall_analysis.txt` | 系统调用分析（strace，需 -p） |
+| `pmu_info.txt` | PMU 远程访问与 HHA 分析（仅 aarch64） |
+
+---
+
+## 执行决策
+
+```
+需要采集数据
+└── 目标是否为远端服务器（用户输入中含 IP）？
+    ├── 是 → 必须组合 opentunex-remote-execution 技能（见下节）
+    └── 否 → 本地直接 bash 执行
+```
+
+**任何采集需求都通过 `bottleneck_data_collector.sh` 完成，不存在其他采集脚本或模式。**
+
+> **注意**：
+> - 热点函数分析、系统调用分析**必须指定 PID**（通过 `-p`，仅一个活跃 PID，详见本节说明）
+> - 脚本已硬校验：`-p` 出现逗号会被直接拒绝，避免 pgrep 多行输出被误传
+> - 建议以 root 运行；非 root 下 perf、strace 等采集功能受限
+> - 判断标准：**用户输入中是否明确给出了远端 IP 地址**——如果给了 IP，必须走远程执行流程
+
+---
+
+## 远程执行场景（CRITICAL — 目标为远端服务器时必读）
+
+当采集目标为远端 Linux 服务器时，本技能必须与 `opentunex-remote-execution` 技能组合使用，禁止绕过脚本直接合成命令执行。
 
 ### 正确的远程执行流程
 
 ```
-本地 scripts/ 目录中的脚本文件
+本地 scripts/bottleneck_data_collector.sh
     │
     ▼
-scp 上传到远端 ${WORK_DIR}/collect/scripts/
+scp 上传到远端 /tmp/bottleneck_data_collector.sh
     │
     ▼
-ssh 远端执行上传后的脚本
+ssh -q -tt 远端执行脚本
     │
     ▼
-脚本输出直接落盘到远端 ${WORK_DIR}/collect/
+脚本输出直接落盘到远端 -o 指定目录（数据不出服务器）
 ```
 
 ### 强制规则
 
-1. **必须上传脚本文件**：将 `scripts/` 下的脚本文件通过 SCP 上传到远端 `${WORK_DIR}/collect/scripts/`，再通过 SSH 执行。**禁止**将脚本内容读出来后拆解为单条命令内联到 SSH 中执行。
-2. **禁止内联合成命令**：**禁止**读取 `collection-items-reference.md` 后自行合成等价采集命令（如 mpstat、iostat、vmstat 等）直接 SSH 执行。采集逻辑必须以脚本文件形式完整上传。
+1. **必须上传脚本文件**：将脚本文件通过 `scp` 上传到远端（如 `/tmp/bottleneck_data_collector.sh`）后执行。**禁止**读取脚本内容后拆解为单条命令内联到 SSH 中执行。
+2. **禁止内联合成命令**：**禁止**自行合成等价采集命令（如 mpstat、iostat、vmstat 等）直接 SSH 执行。采集逻辑必须以脚本文件形式完整上传。
 3. **脚本文件完整性**：上传的脚本文件必须与本地 `scripts/` 中的源文件**字节一致**，禁止通过 heredoc / echo / printf 等方式在远端重建脚本内容。
-4. **远端路径约定**：脚本上传到远端 `${WORK_DIR}/collect/scripts/`，执行后产出文件写入远端 `${WORK_DIR}/collect/`（ `${WORK_DIR}` 默认按 `/srv/opentunex/<YYYYMMDD_HHMMSS>/` 这个格式根据当前日期时间生成）。
+4. **数据不出服务器**：采集数据留在远端落盘，禁止拷贝回本地分析。
+5. **`${WORK_DIR}` 是远端路径**：远端模式下 `-o` 参数的 `${WORK_DIR}` 是**远端服务器上**的目录（`/srv/opentunex/<YYYYMMDD_HHMMSS>/`，由 `witty-opentunex` 初始化）。输出目录必须在**远端**创建（`ssh` 执行 `mkdir`），**禁止**在 agent 本地（如 Windows）创建同名目录或把采集数据写到本地。详见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`。
 
 ### 远程执行示例
 
 ```bash
-# 标准流程：上传脚本 → 远端执行
-# Step 1: 上传脚本文件到远端
-scp scripts/collect_all.sh ${user}@${ip}:${WORK_DIR}/collect/scripts/
-scp scripts/collect_cpu_info.sh ${user}@${ip}:${WORK_DIR}/collect/scripts/
-scp scripts/collect_mem_info.sh ${user}@${ip}:${WORK_DIR}/collect/scripts/
-# ... (上传所有需要的采集脚本)
+# Step 1: 远端创建输出目录（${WORK_DIR} 是远端路径）
+ssh ${user}@${ip} "mkdir -p ${WORK_DIR}/collect"
 
-# Step 2: SSH 远端执行（脚本已上传，直接调用）
-ssh -q -tt ${user}@${ip} "bash ${WORK_DIR}/collect/scripts/collect_all.sh ${WORK_DIR}/collect/ all 10 1"
+# Step 2: 上传脚本文件到远端
+scp scripts/bottleneck_data_collector.sh ${user}@${ip}:/tmp/
 
-# 一键采集同理
-scp scripts/server_data_collector.sh ${user}@${ip}:${WORK_DIR}/collect/scripts/
-ssh -q -tt ${user}@${ip} "bash ${WORK_DIR}/collect/scripts/server_data_collector.sh -d 60 -o ${WORK_DIR}/collect/"
+# Step 3: SSH 远端执行（-o 指向远端工作目录；引号内是远端 Linux 命令）
+# 默认采集方式，不指定PID
+ssh -q -tt ${user}@${ip} "bash /tmp/bottleneck_data_collector.sh -d 10 -o ${WORK_DIR}/collect"
+
+# 当明确有特定应用（mysql/redis 等）需要指定 PID 采集时：远端先取一个活跃 PID，
+# 再带进 ssh 单引号内。同样的禁令：禁止把 pgrep 多行输出整列塞给 -p，脚本会拒绝执行。
+APP_PID=$(ssh -q ${user}@${ip} "pgrep -a '$APP_NAME' | awk '\$2!=\"Z\" {print \$1; exit}'")
+ssh -q -tt ${user}@${ip} "bash /tmp/bottleneck_data_collector.sh -d 10 -p '$APP_PID' -o ${WORK_DIR}/collect"
 ```
+
+> agent 主机为 Windows 时，本地侧命令（`scp` 路径、引号）按 `opentunex-remote-execution` 的平台指南翻译（PowerShell 双引号、`$env:TEMP` 等）；`ssh` 引号内的远端命令保持 Linux 语法不变。
 
 **❌ 禁止的做法**（会导致绕过脚本、数据格式不一致）：
 ```bash
 # 错误：将采集项拆解为单条命令执行
 ssh ${user}@${ip} "mpstat -P ALL 1 5 > /tmp/cpu.txt"
 ssh ${user}@${ip} "free -h > /tmp/mem.txt"
-ssh ${user}@${ip} "iostat -xz 1 5 > /tmp/io.txt"
-# ... 这种做法绕过了脚本的完整采集逻辑，产出格式与下游契约不兼容
 ```
 
-> **注意**：如果 agent 主机本身就在目标服务器上（本地采集），则无需远程执行，直接按下方示例在本地 bash 中执行脚本即可。判断标准：**用户输入中是否明确给出了远端 IP 地址**——如果给了 IP，必须走远程执行流程。
-
----
-
----
-
-## 三种采集方式
-
-### 1. 一键采集：`server_data_collector.sh`
-
-适用：全量诊断、热点/系统调用/微架构分析、devkit 工具（aarch64）。默认使用该采集方式。
-
-```bash
-# 全量采集（60 秒）
-bash scripts/server_data_collector.sh -d 60
-
-# 指定进程采集（热点分析等必需）
-bash scripts/server_data_collector.sh -d 60 -p 1234
-
-# 指定输出目录
-bash scripts/server_data_collector.sh -d 60 -o ${WORK_DIR}/collect/profiling
-
-# 指定采集项目（项目名见 -h 输出）
-bash scripts/server_data_collector.sh -d 30 -c collect_cpu_detail_info,collect_mem_metrics
-
-# 仅前置依赖检查 / 查看采集项目列表
-bash scripts/server_data_collector.sh -C
-bash scripts/server_data_collector.sh -h
-```
-
-| 参数 | 说明 | 必填 |
-|------|------|------|
-| `-d <秒>` | 采集持续时间 | 是（除非用 -C/-h） |
-| `-p <PID>` | 监控进程ID，逗号分隔；热点/系统调用/微架构分析必需 | 否 |
-| `-o <目录>` | 输出目录，默认 `profiling_data_<arch>_<时间戳>/` | 否 |
-| `-c <项目>` | 指定采集项目，逗号分隔；默认全部 | 否 |
-| `-t <秒>` | 命令超时缓冲，默认 60 | 否 |
-
-输出：每个采集项对应一个 `.txt` 文件，写入 `-o` 指定目录。
-
----
-
-### 2. 轻量编排：`collect_all.sh`
-
-适用：只需 CPU/内存/IO/网络/进程/系统/内核/容器/PMU 这 9 个基础维度，不需要热点分析等高级功能。
-
-```bash
-# 全量采集（9 个维度，并行调度）
-bash scripts/collect_all.sh "$BATCH_DIR"
-
-# 单项/多项采集
-bash scripts/collect_all.sh "$BATCH_DIR" cpu
-bash scripts/collect_all.sh "$BATCH_DIR" cpu,mem,io
-
-# 指定采集时长和间隔
-bash scripts/collect_all.sh "$BATCH_DIR" all 10 1
-```
-
-| 位置 | 参数 | 默认值 | 说明 |
-|------|------|--------|------|
-| $1 | batch_dir | ${WORK_DIR}/collect/ | 批次输出目录 |
-| $2 | items | all | 采集项：all 或逗号分隔列表 |
-| $3 | duration | 10 | 采集时长（秒/次） |
-| $4 | interval | 1 | 采集间隔（秒） |
-
-可选 items 值：`cpu` `mem` `io` `net` `process` `system` `kernel` `container` `pmu` `process-thread-poll`
-
-并行调度：组1(cpu/mem/io) → 组2(net/process) → 组3(system) → 串行(kernel/container) → 独立(pmu/process-thread-poll)
-
-输出：`<item>-collection_report.txt` 写入 batch_dir。
-
----
-
-### 3. 单项采集脚本（独立调用）
-
-适用：只需某个特定维度、瓶颈分析域要求补充采集、需要对单维度精细化采集。
-
-```bash
-mkdir -p "$BATCH_DIR"
-bash scripts/<script>.sh "$BATCH_DIR" [duration] [interval]
-```
-
-| 脚本 | 适用场景关键词 |
-|------|--------------|
-| `collect_cpu_info.sh` | CPU高、负载大、NUMA、频率、mpstat |
-| `collect_mem_info.sh` | 内存不足、OOM、Swap、大页、NUMA内存 |
-| `collect_io_info.sh` | 磁盘慢、IO高、await延迟、iostat |
-| `collect_net_info.sh` | 网络慢、丢包、重传、队列、网卡驱动 |
-| `collect_process_info.sh` | 进程多、线程泄漏、上下文切换、pidstat |
-| `collect_process_thread_poll.sh` | 线程创建/销毁频繁（eBPF 降级方案） |
-| `collect_system_sar.sh` | 全貌、基线、sar、PSI、系统概况 |
-| `collect_kernel_config.sh` | 内核参数、sysctl、模块、taint、启动参数 |
-| `collect_container_info.sh` | 容器资源、Docker、cgroup、容器CPU/内存 |
-| `collect_pmu_info.sh` | PMU事件、NUMA远程访问、perf stat |
-
-输出：`<item>-collection_report.txt` 写入 batch_dir。
-
----
-
-## 选用决策
-
-```
-需要采集数据
-├── 目标是否为远端服务器（用户输入中含 IP）？
-│   ├── 是 → 必须组合 opentunex-remote-execution：先 scp 上传脚本，再 ssh 执行
-│   └── 否 → 本地直接执行，按下方决策树选择脚本
-├── 需要完整诊断（热点/系统调用/微架构/devkit）？
-│   └── server_data_collector.sh -d <秒> [-p <PID>] [-c <项目>]
-├── 只需要 9 个基础维度？
-│   └── collect_all.sh "$BATCH_DIR" [items] [duration] [interval]
-└── 只需要某个特定维度？
-    └── bash scripts/collect_<item>_info.sh "$BATCH_DIR" [duration] [interval]
-```
-
-> **注意**：
-> - **远程目标必须先上传脚本**：当目标为远端服务器时，必须先通过 `opentunex-remote-execution` 的 SCP 将 scripts/ 下的文件上传到远端 `${WORK_DIR}/collect/scripts/`，再通过 SSH 执行。**禁止**将脚本内容拆解为单条命令直接 SSH 执行。
-> - 热点函数分析、系统调用分析、微架构瓶颈分析**必须指定 PID**（通过 `-p`）
-> - `server_data_collector.sh` 的采集项目名（如 `collect_cpu_detail_info`）与 `collect_all.sh` 的短名（如 `cpu`）不同，不要混用
-> - 一键采集输出到 `-o` 目录，轻量编排和单项采集输出到 `$BATCH_DIR`
-
----
-
-## eBPF 辅助脚本（无需直接调用）
-
-以下脚本由 `collect_net_info.sh` 或 `collect_process_info.sh` 内部调用：
-
-| 脚本 | 被调用方 |
-|------|---------|
-| `collect_net_ebpf_traffic.py` | collect_net_info.sh（进程间流量亲和性） |
-| `collect_net_ebpf_queue.py` | collect_net_info.sh（线程队列分布） |
-| `collect_process_ebpf_thread.py` | collect_process_info.sh（线程创建/销毁事件） |
+> **注意**：如果 agent 主机本身就在目标服务器上（本地采集），则无需远程执行，直接按上方示例在本地 bash 中执行脚本即可。
 
 ---
 
 ## 输出位置约定
 
-| 执行方式 | 输出路径 | 文件命名 |
-|---------|---------|---------|
-| 一键采集 | `-o` 指定目录或 `${WORK_DIR}/collect/profiling_data_<arch>_<时间戳>/` | `<采集项名>.txt` |
-| 轻量编排/单项 | `${WORK_DIR}/collect/` | `<item>-collection_report.txt` |
-| 采集日志 | `${WORK_DIR}/collect/collect_log/` | `<item>_<时间戳>.log` |
+| 项 | 路径 |
+|----|------|
+| 采集数据 | `-o` 指定目录，或默认 `bottleneck_data_<arch>_<YYYYMMDD_HHMMSS>/`（相对当前目录） |
 
 > `WORK_DIR` 可通过环境变量 `OPENTUNEX_WORK_DIR` 自定义，默认 `/srv/opentunex/<YYYYMMDD_HHMMSS>/`
 
@@ -214,12 +147,11 @@ bash scripts/<script>.sh "$BATCH_DIR" [duration] [interval]
 
 | 场景 | 处理方式 |
 |------|---------|
-| 工具不可用（sar、perf 等） | 一键采集自动检测并提示安装；独立脚本自动降级 |
-| devkit 工具缺失（aarch64） | 一键采集提示自动下载安装 |
-| eBPF 环境不满足 | 跳过 eBPF 项，使用轮询方式降级 |
-| 部分采集失败 | 标注失败项，继续其他维度，不中断流程 |
-| Docker Daemon 不可用 | 容器采集使用纯 cgroup 模式 |
-| 命令执行超时 | 一键采集按 `-t` 参数超时中止 |
+| 工具不可用（sar、perf、mpstat 等） | 脚本自动降级：标注不可用项，继续其他维度，不中断流程 |
+| perf/strace 不可用或非 root | 热点/系统调用分析失败并标注，其他采集继续 |
+| 未指定 `-p` | 热点/系统调用分析跳过并标注 |
+| 非 aarch64 架构 | PMU 采集自动跳过 |
+| 部分采集失败 | 标注失败项，继续其他采集，不中断流程 |
 
 ---
 
@@ -227,6 +159,6 @@ bash scripts/<script>.sh "$BATCH_DIR" [duration] [interval]
 
 | 资源 | 何时读取 |
 |------|---------|
-| [collection-items-reference.md](references/collection-items-reference.md) | 需要查看每个维度具体采集哪些数据项时 |
+| [collection-items-reference.md](references/collection-items-reference.md) | 需要查看每个数据文件具体包含哪些数据项时 |
 | [constraints-data-collection.md](references/constraints-data-collection.md) | 查看完整约束列表时 |
-| `bash scripts/server_data_collector.sh -h` | 需要查看一键采集支持的全部项目时 |
+| `bash scripts/bottleneck_data_collector.sh -h` | 需要查看全部采集项目时 |
