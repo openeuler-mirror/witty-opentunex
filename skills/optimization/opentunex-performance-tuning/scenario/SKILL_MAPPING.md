@@ -1,16 +1,18 @@
 # 调优场景映射参考
 
-根据融合分析报告的调优方向描述，路由到对应的调优技能。场景化调优方向（NUMA、窃取任务、Docker算力、分域调度、动态SMT、网卡多路径）统一由 `opentunex-scenario-tuning` 技能协调处理。
+根据融合分析报告的调优方向描述，路由到对应的调优技能。每个调优技能是原子化的，数据来源是瓶颈分析结果。
 
 **调优执行约束**：所有调优技能**禁止**直接在宿主机上或通过远程机器连接执行任何调优命令，必须依据 [中间态建议模板](../references/intermediate-report-template.md) 生成中间态调优建议，最终由调优域入口依据 [最终汇总报告模板](../references/tuning-report-template.md) 汇总为一份完整的调优建议报告。
+
+远端场景：表中的 `${WORK_DIR}` 路径均为远端服务器路径，文件操作经 `opentunex-remote-execution` 在远端执行。详见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`
 
 ## 映射表
 
 | 调优方向描述 | 调优域分类 | 所需输入数据 | 调优内容 | 中间态建议输出路径 |
 |------------|-----------|-------------|---------|------------------|
-| numa并行感知调度特性优化 | 场景调优 | 瓶颈分析结果（NUMA相关） | 由opentunex-scenario-tuning协调 | `${WORK_DIR}/tuning/intermediate/scenario-tuning.md` |
-| 窃取任务调度特性优化 | 场景调优 | 瓶颈分析结果（窃取任务相关） | 由opentunex-scenario-tuning协调 | `${WORK_DIR}/tuning/intermediate/scenario-tuning.md` |
-| Docker算力统筹优化 | 场景调优 | 瓶颈分析结果（Docker Correlation Burst相关） | 由opentunex-scenario-tuning协调 | `${WORK_DIR}/tuning/intermediate/scenario-tuning.md` |
+| numa并行感知调度特性优化 | 场景调优 | 瓶颈分析结果（NUMA相关） | 启用PARAL特性+设置sched_util_low_pct=100 | `${WORK_DIR}/tuning/intermediate/numa-sched-tuning.md` |
+| 窃取任务调度特性优化 | 场景调优 | 瓶颈分析结果（窃取任务相关） | 启用STEAL特性 | `${WORK_DIR}/tuning/intermediate/stealtask-tuning.md` |
+| Docker算力统筹优化 | 场景调优 | 瓶颈分析结果（Docker Coordination Burst相关） | 设置sched_soft_runtime_ratio+容器cpu.soft_quota=1 | `${WORK_DIR}/tuning/intermediate/docker-coordination-burst-tuning.md` |
 | 分域调度soft_domain特性优化 | 场景调优 | 瓶颈分析结果（分域调度相关） | 由opentunex-scenario-tuning协调 | `${WORK_DIR}/tuning/intermediate/scenario-tuning.md` |
 | 动态SMT调度特性优化 | 场景调优 | 瓶颈分析结果（SMT相关） | 由opentunex-scenario-tuning协调 | `${WORK_DIR}/tuning/intermediate/scenario-tuning.md` |
 | 网卡多路径中断亲和优化 | 场景调优 | 瓶颈分析结果（网络中断相关） | 由opentunex-scenario-tuning协调 | `${WORK_DIR}/tuning/intermediate/scenario-tuning.md` |
@@ -41,6 +43,5 @@
 
 | 调优方向A | 调优方向B | 冲突资源 | 执行策略 |
 |----------|----------|---------|---------|
-| 场景化调优（NUMA调度） | OS内核CPU调度参数优化 | sched_util_low_pct | 串行：先scenario-tuning，后os-performance-optimization |
-
-> **注意**：场景化调优方向之间的内部冲突（如窃取任务 vs NUMA、动态SMT vs 窃取任务等）由 `opentunex-scenario-tuning` 技能内部的 [冲突约束表](../../opentunex-scenario-tuning/references/SKILL_MAPPING.md) 处理，此处不再重复声明。
+| numa并行感知调度特性优化 | OS内核CPU调度参数优化 | sched_util_low_pct | 串行：先numa并行感知调度，后OS调度参数 |
+| 窃取任务调度特性优化 | numa并行感知调度特性优化 | sched_features | 串行：先numa并行感知调度，后窃取任务 |

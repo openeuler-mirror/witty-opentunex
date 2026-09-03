@@ -114,4 +114,6 @@ echo [原始值] > /proc/sys/kernel/sched_util_low_pct
 
 最终汇总报告保存至：`${WORK_DIR}/tuning/tuning-report.md`
 
+远端场景：报告在 agent 本地生成后 scp 上传到远端该路径（或经远端命令落盘），`${WORK_DIR}` 为远端路径，禁止在 agent 本地创建。详见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`
+
 `${WORK_DIR}` 本身已包含时间戳，本次所有调优产出均在此目录内完成。

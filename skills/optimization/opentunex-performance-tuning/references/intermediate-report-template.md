@@ -69,4 +69,6 @@
 
 中间态调优建议保存至：`${WORK_DIR}/tuning/<timestamp>/intermediate/<调优方向>.md`
 
+远端场景：报告在 agent 本地生成后 scp 上传到远端该路径（或经远端命令落盘），`${WORK_DIR}` 为远端路径，禁止在 agent 本地创建。详见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`
+
 每次生成时按当前日期时间创建新目录，并更新 `latest` 符号链接指向最新批次。

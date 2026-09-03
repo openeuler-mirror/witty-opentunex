@@ -29,26 +29,42 @@ constraints_file: "references/constraints-bottleneck.md"
 
 - 写入：`${WORK_DIR}/analysis/<skill>_collect/`
 - 读取：`${WORK_DIR}/analysis/<skill>_collect/`
-- 读取采集数据：`${WORK_DIR}/`（用户指定目录，一键采集脚本预置）
+- 读取采集数据：`${WORK_DIR}/collect/`（数据采集阶段 `bottleneck_data_collector.sh -o ${WORK_DIR}/collect` 的产物；用户指定 DATA_DIR 时优先）
 - 分析结果在所有子智能体执行完毕且融合报告生成后写入分析目录
+
+### 执行模式与 `${WORK_DIR}` 语义（核心）
+
+- **远端模式**（用户输入含远端 IP，由 `witty-opentunex` 判定并传递）：`${WORK_DIR}` 是**远端服务器上**的路径（`/srv/opentunex/<YYYYMMDD_HHMMSS>/`）。本技能中所有对 `${WORK_DIR}` 的操作（mkdir/ls/写契约/读契约/读数据/写报告）都必须在**远端**执行——通过 `opentunex-remote-execution` 的 ssh 机制，**禁止**在 agent 本地对 `${WORK_DIR}` 做任何文件操作。具体写法见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`，本文件下方命令块均已按此标注远端/本地写法
+- **本地模式**（无 IP）：`${WORK_DIR}` 为 agent 主机本地目录，命令直接本地执行（即下方 bash 块去掉 ssh 包装）
+- **模式传递**：启动子智能体时，必须把 `execution_mode`、`user`、`ip`、`${WORK_DIR}` 写入输入契约并随任务描述传给子智能体；子智能体同样必须遵守远端语义
 
 ### 子技能约束
 
 子技能执行约束详见 [references/constraints-bottleneck.md](references/constraints-bottleneck.md)，子智能体必须在输出契约中确认遵守。
 
-**⚠️ B-08: 禁止内联执行子技能（核心约束）**：
+**⚠️ B-08: 子技能执行模式选择（核心约束）**：
 
-> 调度声明中列出的子智能体必须尝试通过子智能体工具启动独立上下文执行，禁止在当前上下文中内联读取子技能 SKILL.md 直接执行。完整约束语义见 [references/constraints-bottleneck.md](references/constraints-bottleneck.md) B-08 条。
+> 按执行条件在两种模式中选择其一。完整约束语义见 [references/constraints-bottleneck.md](references/constraints-bottleneck.md) B-08 条。
 >
-> 核心要点：
-> - 如果子智能体工具不可用或能力不足（如无法写文件），才允许降级模式，但必须标注 `execution_mode: "degraded"` 并记录降级原因
-> - **严禁在子智能体工具可用时主动选择降级模式，即使认为内联执行更高效或更方便**
-> - **"数据已加载到上下文"不是跳过子智能体的正当理由——这正是 B-08 要防止的可及性偏差**
-> - **路径不匹配不是豁免条款**——数据路径只是输入契约中的一个字段，路径差异不影响执行步骤
+> **模式 1（默认）：子智能体模式** — 子智能体工具可用且能力充足时，启动独立上下文并行执行。
+>
+> **模式 2（降级路径）：内联执行模式** — 满足下列任一条件时必须降级，并在输出契约标注 `execution_mode: "degraded"`：
+> - 子智能体工具不可用（如 harness 未启用 Agent 工具、未配置可用的 subagent_type）
+> - 子智能体工具能力不足（如无法写文件、无法执行远端脚本、权限受限）
+> - 用户明确要求内联执行
+>
+> **模式选择规则**：
+> - 不得以"更高效/更方便"等主观判断绕过子智能体模式
+> - "数据已加载到上下文"不是跳过子智能体的正当理由——子智能体独立加载自己的上下文
+> - 路径不匹配不是豁免条款——数据路径只是输入契约中的一个字段
 
-> **⚠️ 会话 compaction 防护**：如果本会话经历过上下文压缩（compaction），可能导致对 B-08 约束的理解丢失或歧义。任何情况下，"子智能体不能内联执行"的含义是**必须通过子智能体工具启动独立上下文**，而不是"不执行子智能体、直接在当前上下文合成结果"。
+> **⚠️ 会话 compaction 防护**：如果本会话经历过上下文压缩（compaction），可能导致对 B-08 约束的理解丢失或歧义。任何情况下：
+> - 若子智能体工具可用 → 必须通过子智能体工具启动独立上下文执行
+> - 若子智能体工具不可用 → **必须降级为内联执行**（模式 2），不得因为"约束说要禁止内联"而拒绝执行
 
-> **⚠️ 数据已在上下文中的场景**：如果采集数据已经因为用户输入、会话历史、或其他原因加载到了当前上下文中，**仍然必须启动子智能体**。正确做法是将数据路径（而非数据内容）写入输入契约，让子智能体在独立上下文中重新读取数据文件。主智能体不得因为"数据已经在上下文中"就跳过子智能体调度——上下文隔离和并行能力的价值不依赖于数据是否已加载。
+> **⚠️ 数据已在上下文中的场景**：如果采集数据已经因为用户输入、会话历史、或其他原因加载到了当前上下文中：
+> - 若子智能体工具可用 → 仍然必须启动子智能体，将数据路径（而非数据内容）写入输入契约
+> - 若子智能体工具不可用 → 不得因"数据已在上下文中"而阻碍降级到内联模式
 
 ---
 
@@ -102,13 +118,13 @@ analysis 入口
 
 数据来源：**数据采集层**
 
-**数据读取路径**：用户通过一键采集脚本指定的目录，`WORK_DIR` 变量指向该目录，数据文件位于 `${WORK_DIR}/` 根目录下。
+**数据读取路径**：数据采集阶段的产出目录，`WORK_DIR` 变量指向工作目录根，数据文件位于 `${WORK_DIR}/collect/` 下（用户通过 DATA_DIR 指定预采集目录时优先使用 DATA_DIR）。
 
-| 数据类别 | 必需 | 采集内容 | 对应子目录 |
+| 数据类别 | 必需 | 采集内容 | 对应文件（`${WORK_DIR}/collect/` 下） |
 |---------|------|---------|-----------|
-| 系统环境静态信息 | 是 | 硬件规格、软件版本、内核参数 | `system-collection_collect/`、`kernel-collection_collect/` |
-| 全局资源瓶颈识别 | 是 | CPU/内存/IO/网络指标 | `cpu-collection_collect/`、`mem-collection_collect/`、`io-collection_collect/`、`net-collection_collect/` |
-| 高资源消耗进程列表 | 是 | Top CPU/内存/IO进程 | `process-collection_collect/` |
+| 系统环境静态信息 | 是 | 硬件规格、软件版本、内核参数 | `static_info.txt`、`kernel_config_info.txt` |
+| 全局资源瓶颈识别 | 是 | CPU/内存/IO/网络指标 | `global_bottleneck.txt`、`cpu_detail_info.txt`、`memory_metrics_analysis.txt`、`io_metrics_analysis.txt`、`network_metrics_analysis.txt` |
+| 高资源消耗进程列表 | 是 | Top CPU/内存/IO进程 | `top_processes.txt`、`process_detail_info.txt` |
 
 **数据路径优先级**：
 
@@ -121,7 +137,23 @@ analysis 入口
 
 ## 执行步骤
 
-### 步骤 0：创建批次目录与契约目录【强制】
+### 步骤 0：创建瓶颈分析所需目录【强制】
+
+**远端模式**（`${WORK_DIR}` 是远端路径，经 ssh 在远端创建，一次 ssh 建完）：
+
+```bash
+ssh ${user}@${ip} "mkdir -p ${WORK_DIR}/analysis/contracts \
+  ${WORK_DIR}/analysis/opentunex-top-down-bottleneck_collect \
+  ${WORK_DIR}/analysis/opentunex-scenario-bottleneck_collect \
+  ${WORK_DIR}/analysis/opentunex-numa-sched-analysis_collect \
+  ${WORK_DIR}/analysis/opentunex-stealtask-analysis_collect \
+  ${WORK_DIR}/analysis/opentunex-dynamic-smt-analysis_collect \
+  ${WORK_DIR}/analysis/opentunex-docker-coordination-burst-analysis_collect \
+  ${WORK_DIR}/analysis/opentunex-soft-domain-analysis_collect \
+  ${WORK_DIR}/analysis/opentunex-multi-net-path-analysis_collect"
+```
+
+**本地模式**（agent 主机即目标机，直接本地执行）：
 
 ```bash
 mkdir -p ${WORK_DIR}/analysis/contracts
@@ -136,6 +168,8 @@ mkdir -p ${WORK_DIR}/analysis/opentunex-multi-net-path-analysis_collect
 mkdir -p ${WORK_DIR}/analysis/opentunex-scenario-bottleneck_collect
 ```
 
+> **远端模式禁止**：在 agent 本地（如 Windows）`mkdir ${WORK_DIR}/...`——`${WORK_DIR}` 只存在于远端。
+
 #### 步骤 0 完成检查清单【不可跳过】
 
 在进入步骤 1 前，必须确认以下各项：
@@ -146,34 +180,38 @@ mkdir -p ${WORK_DIR}/analysis/opentunex-scenario-bottleneck_collect
 - [ ] **尚未读取任何采集数据文件**（数据由子智能体自行读取，主智能体不预加载）
 - [ ] 准备好写入输入契约并启动子智能体
 
-> **⚠️ 关键时序约束**：主智能体在启动子智能体之前**不得读取采集数据文件**。数据由子智能体在独立上下文中自行读取。如果主智能体提前读取了数据，"数据在手"的可及性会压制子智能体调度的动机，导致违反 B-08 约束。
+> **⚠️ 关键时序约束（仅在子智能体工具可用时生效）**：主智能体在启动子智能体之前**不得读取采集数据文件**。数据由子智能体在独立上下文中自行读取。如果主智能体提前读取了数据，"数据在手"的可及性会压制子智能体调度的动机，导致违反 B-08 模式 1 约束。若子智能体工具不可用/能力不足，应主动落地降级模式（模式 2），不受本时序约束限制。
 
 ### 步骤 1：写入输入契约并启动子智能体【纯调度阶段，禁止读取数据】
 
 > **⚠️ B-08 执行纪律检查点**：
 > 
 > 在执行本步骤前，自问以下问题：
-> - 我是否已经读取了采集数据文件？如果是 → **停止**，你已经违反了 B-08 约束
-> - 我是否正打算先看一下数据再决定怎么分析？如果是 → **停止**，数据由子智能体读取
-> - 我是否觉得"数据都在手边了，直接分析更快"？如果是 → **这正是 B-08 要防止的可及性偏差**
+> - 我是否已经读取了采集数据文件？若是子智能体工具可用 → **停止**，你已经违反了 B-08 约束；若是子智能体工具不可用 → 属于降级模式，应在输出契约标注 `execution_mode: "degraded"`
+> - 我是否正打算先看一下数据再决定怎么分析？若是子智能体工具可用 → **停止**，数据由子智能体读取
+> - 我是否觉得"数据都在手边了，直接分析更快"？若是子智能体工具可用 → **这正是 B-08 要防止的可及性偏差**；若是子智能体工具不可用 → 应当主动落地降级模式
 > - 数据路径不是 `${WORK_DIR}/` → **路径不匹配不是豁免条款**，把实际路径写入输入契约的 data_dir 字段即可
+> - 我是否检测到子智能体工具不可用/能力不足？若是 → **必须降级为内联模式**，按 B-08 模式 2 执行
 > 
 > **正确做法**：只写契约路径（data_dir 填实际路径），不读数据内容。spawn 子智能体，让它们自己读数据。
 
 #### 1.1 校验数据可用性（仅检查目录存在性，禁止读取文件内容）
 
 ```bash
-# ✅ 允许：检查目录是否存在
-ls ${WORK_DIR}/
+# ✅ 允许：检查目录是否存在（远端模式经 ssh 在远端执行）
+ssh ${user}@${ip} "ls ${WORK_DIR}/ && ls ${WORK_DIR}/collect/"
 
-# ❌ 禁止：读取任何数据文件内容
-# cat ${WORK_DIR}/cpu-collection_collect/report.txt  ← 违反 B-08
-# head ${WORK_DIR}/mem-collection_collect/report.txt  ← 违反 B-08
+# ❌ 禁止：读取任何数据文件内容（子智能体工具可用时，违反 B-08 模式 1）
+# 远端模式: ssh ${user}@${ip} "cat ${WORK_DIR}/collect/global_bottleneck.txt"  ← 违反 B-08
+# 本地模式: cat ${WORK_DIR}/collect/global_bottleneck.txt  ← 违反 B-08
+# 注：子智能体工具不可用/能力不足时，应落地 B-08 模式 2 的降级路径
 ```
 
 数据不完整时提示数据采集层补充。
 
 #### 1.2 写入输入契约
+
+契约文件本身也要写入 `${WORK_DIR}`（远端路径）。**远端模式**：先用 Write 工具在 agent 本地写契约文件，再 `scp` 上传到远端对应路径；**本地模式**：直接写到 `${WORK_DIR}/analysis/contracts/`。
 
 **写入通用分析输入契约**：
 
@@ -183,9 +221,13 @@ skill_name: "opentunex-top-down-bottleneck"
 timestamp: "<timestamp>"
 input:
   analysis_dir: "${WORK_DIR}/analysis"
-  data_dir: "${WORK_DIR}/"
+  data_dir: "${WORK_DIR}/collect"   # 数据采集阶段产出目录；用户指定 DATA_DIR 时填实际路径
   work_dir: "${WORK_DIR}/"
   collect_dir: "opentunex-top-down-bottleneck_collect"
+execution_context:
+  execution_mode: "remote" | "local"   # 远端模式必填 remote
+  user: "<远端用户名，默认 root>"        # 远端模式必填
+  ip: "<远端服务器 IP>"                  # 远端模式必填
 constraints_file: "references/constraints-bottleneck.md"
 ```
 
@@ -197,10 +239,16 @@ skill_name: "opentunex-scenario-bottleneck"
 timestamp: "<timestamp>"
 input:
   analysis_dir: "${WORK_DIR}/analysis"
-  data_dir: "${WORK_DIR}/"
+  data_dir: "${WORK_DIR}/collect"   # 数据采集阶段产出目录；用户指定 DATA_DIR 时填实际路径
   work_dir: "${WORK_DIR}/"
+execution_context:
+  execution_mode: "remote" | "local"
+  user: "<远端用户名，默认 root>"
+  ip: "<远端服务器 IP>"
 constraints_file: "references/constraints-bottleneck.md"
 ```
+
+**子智能体任务描述必须包含执行模式上下文**：`execution_mode=remote（user、ip 如上），${WORK_DIR} 为远端路径，所有对 ${WORK_DIR} 的读写经 opentunex-remote-execution 在远端执行，见 references/work_dir_remote_semantics.md`。
 
 **并行启动两个子智能体**（同一轮中同时启动）：
 
@@ -209,7 +257,7 @@ constraints_file: "references/constraints-bottleneck.md"
 - 加载技能定义：opentunex-top-down-bottleneck/SKILL.md
 - 读取输入契约：[analysis_dir]/contracts/opentunex-top-down-bottleneck-input.yaml
 - 读取约束文件：references/constraints-bottleneck.md
-- 子智能体自行读取采集数据：${WORK_DIR}/
+- 子智能体自行读取采集数据：${WORK_DIR}/collect（远端模式经 ssh 读取，禁止 scp 拷回本地）
 - 执行六阶段分析（G-Phase 1~6）
 - G-Phase 5 按需启动二级子智能体执行深度分析
 - 写入输出契约：[analysis_dir]/contracts/opentunex-top-down-bottleneck-output.yaml
@@ -219,7 +267,7 @@ constraints_file: "references/constraints-bottleneck.md"
 - 加载技能定义：opentunex-scenario-bottleneck/SKILL.md
 - 读取输入契约：[analysis_dir]/contracts/opentunex-scenario-bottleneck-input.yaml
 - 读取约束文件：references/constraints-bottleneck.md
-- 子智能体自行读取采集数据：${WORK_DIR}/
+- 子智能体自行读取采集数据：${WORK_DIR}/collect（远端模式经 ssh 读取，禁止 scp 拷回本地）
 - 全量调度所有场景分析子技能并行执行
 - 各子技能自行判断适用性，分析报告写入对应 _collect 目录
 - 写入输出契约：[analysis_dir]/contracts/opentunex-scenario-bottleneck-output.yaml
@@ -254,7 +302,7 @@ constraints_file: "references/constraints-bottleneck.md"
 > **⚠️ 本步骤是输出校验门——如果子智能体输出契约文件不存在，融合阶段无法继续。这阻止了跳过子智能体后试图直接融合的死胡同。**
 
 1. 等待所有子智能体执行完成
-2. 读取各子智能体的输出契约，确认 status 和 constraints_acknowledged
+2. 读取各子智能体的输出契约，确认 status 和 constraints_acknowledged（**远端模式**：契约在远端，经 ssh 读取——`ssh -q ${user}@${ip} "cat ${WORK_DIR}/analysis/contracts/<name>-output.yaml"`，**禁止** scp 拷回本地）
 3. **校验门检查**：
 
 | # | 校验项 | 通过条件 | 未通过处理 |
@@ -272,6 +320,8 @@ constraints_file: "references/constraints-bottleneck.md"
 
 读取各子智能体的分析报告，按需加载融合逻辑执行五阶段融合。
 
+> **远端模式**：报告在远端 `${WORK_DIR}` 下，经 ssh 读取内容（`ssh -q ${user}@${ip} "cat <报告路径>"`），禁止 scp 拷回本地；融合报告写入 `${WORK_DIR}/analysis/opentunex-scenario-bottleneck_collect/result.md` 时同样在远端落盘（本地 Write → scp 上传，或短内容远端 cat 落盘）。详见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`。
+
 **报告定位**：
 
 | 报告来源 | 定位方式 | 典型路径 |
@@ -279,7 +329,7 @@ constraints_file: "references/constraints-bottleneck.md"
 | 通用分析 | 已知路径 | `[analysis_dir]/opentunex-top-down-bottleneck_collect/result.md` |
 | 场景化分析（已融合） | 输出契约 `report_path` | `[analysis_dir]/opentunex-scenario-bottleneck_collect/result.md` |
 
-> **场景分析报告已是融合后的结果**：场景协调器（Phase 2）已按 [场景融合规则](`opentunex-scenario-bottleneck/references/fusion-rules.md`) 完成等价组聚合、冲突消解、依赖检查和策略过滤，输出包含 `primary_plan`、`extended_plan`、`excluded` 的结构化融合报告。域融合以此为输入，不做重新裁决，仅做跨域交叉验证和优先级排序。
+> **场景分析报告已是融合后的结果**：场景协调器（Phase 2）已按 [场景融合规则](../opentunex-scenario-bottleneck/references/fusion-rules.md) 完成等价组聚合、冲突消解、依赖检查和策略过滤，输出包含 `primary_plan`、`extended_plan`、`excluded` 的结构化融合报告。域融合以此为输入，不做重新裁决，仅做跨域交叉验证和优先级排序。
 
 融合逻辑按需读取：[references/fusion-logic.md](references/fusion-logic.md)
 
@@ -325,7 +375,7 @@ constraints_file: "references/constraints-bottleneck.md"
 
 **触发方式**：
 
-读取调优域入口技能定义 `opentunex-performance-tuning/SKILL.md`，按其步骤执行调优流程。融合报告路径 `${WORK_DIR}/analysis/opentunex-scenario-bottleneck_collect/result.md` 作为调优域的数据输入。
+读取调优域入口技能定义 [../../optimization/opentunex-performance-tuning/SKILL.md](../../optimization/opentunex-performance-tuning/SKILL.md)，按其步骤执行调优流程。融合报告路径 `${WORK_DIR}/analysis/opentunex-scenario-bottleneck_collect/result.md` 作为调优域的数据输入。
 
 **如果当前环境支持子智能体工具**：可通过子智能体工具启动调优域入口技能，将融合报告路径传入。
 
