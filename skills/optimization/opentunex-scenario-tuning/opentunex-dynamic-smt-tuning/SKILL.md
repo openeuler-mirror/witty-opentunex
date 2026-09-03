@@ -1,4 +1,9 @@
-# 动态 SMT 调优指南
+---
+name: "opentunex-dynamic-smt-tuning"
+description: "动态SMT调优建议。基于瓶颈分析结果，生成设置sched_util_ratio并启用KEEP_ON_CORE特性的调优建议报告，在低负载时智能分配计算资源提升性能。**必须使用此技能**：当瓶颈分析显示CPU利用率低、SMT超线程已启用、需要动态SMT调优时。触发关键词：dynamic_smt_tune、KEEP_ON_CORE、sched_util_ratio、超线程优化、低负载优化、SMT。"
+---
+
+# opentunex-dynamic-smt-tuning（动态 SMT 调优）
 
 ## 目标
 
@@ -13,24 +18,35 @@
 
 ## 强制约束
 
-> 本指南遵守 [场景调优子技能共享约束](../common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
+> 本技能遵守 [场景调优子技能共享约束](../references/common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
 
-本指南依据 [中间态建议模板](../intermediate-report-template.md) 生成结构化的中间态调优建议。
+本技能依据 `references/intermediate-report-template.md` 模板生成结构化的中间态调优建议。
 
 ### 数据目录约束
 
 - **读取路径**：从 `${WORK_DIR}/analysis/` 下查找包含动态SMT相关分析结论的 `result.md` 文件
 - **查找命令示例**：
 ```bash
+# 远端模式: ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name \"result.md\" ..." 在远端执行；本地模式直接执行
 RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "dynamic_smt\|KEEP_ON_CORE\|sched_util_ratio\|SMT\|超线程" {} \; | head -1)
 ```
 - **数据缺失处理**：如果 `${WORK_DIR}/analysis/` 目录不存在或未找到相关分析结果数据，必须明确提醒用户：**需要先完成瓶颈分析后才能生成调优建议**，不可在无分析数据的情况下直接调优
 
 ---
 
+### 执行模式与 `${WORK_DIR}` 语义（核心）
+
+- 输入契约携带 `execution_context`（`execution_mode` / `user` / `ip`）。**远端模式**（execution_mode=remote）：`${WORK_DIR}` 是**远端服务器上**的路径：
+  - 读取融合报告/分析结果：经 ssh 在远端读取（`ssh -q ${user}@${ip} "grep/cat <远端文件>"`），**禁止** scp 拷回本地；下方 `find ${WORK_DIR}/analysis/ ...` 等命令在远端模式下必须写为 `ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name result.md ..."` 形式
+  - 写入中间态建议/契约到 `${WORK_DIR}/tuning/...`：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端路径；**禁止**在 agent 本地创建 `${WORK_DIR}` 目录
+  - **本技能不创建脚本目录**：本技能仅产出中间态建议（`${WORK_DIR}/tuning/intermediate/dynamic-smt-tuning.md`）与输出契约；调优脚本目录 `${WORK_DIR}/tuning/opentunex-dynamic-smt-tuning/` 由协调器 `opentunex-scenario-tuning` 在步骤 4 统一创建（从本技能 `scripts/` 复制基础脚本 + 生成 `tuning.sh`）。本技能**不再**负责脚本部署与入口脚本生成
+  - 本技能**不执行**调优命令（遵守 T-01/T-02）：`bash scripts/dynamic_smt_tune.sh ...` 与 `echo X > /sys/...` 等命令出现在生成的脚本/报告中，由**用户确认后在远端服务器上执行**；agent 不通过 ssh 代执行
+- **本地模式**（execution_mode=local）：`${WORK_DIR}` 为 agent 本地目录，脚本部署与文件操作为本地操作。
+- 具体写法见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`。
+
 ## 输入约定
 
-本指南的数据来源是**瓶颈分析结果**。
+本技能的数据来源是**瓶颈分析结果**。
 
 | 输入数据 | 必需 | 说明 |
 |---------|------|------|
@@ -90,42 +106,53 @@ dynamic_smt_tune:
 ### 基础脚本调用
 
 ```bash
-cd skills/optimization/opentunex-scenario-tuning
+# 本地路径：定位基础脚本源文件用（skill 目录在 agent 主机上）；远端模式拷贝目标为远端 ${WORK_DIR}/tuning/opentunex-dynamic-smt-tuning/
+cd skills/optimization/opentunex-scenario-tuning/opentunex-dynamic-smt-tuning
 
 # 环境检查
-bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh check
+bash scripts/dynamic_smt_tune.sh check
 
 # 使能动态SMT（默认阈值 100）
-bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh apply
+bash scripts/dynamic_smt_tune.sh apply
 
 # 使能动态SMT（指定阈值 80）
-bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh apply 80
+bash scripts/dynamic_smt_tune.sh apply 80
 
 # 查看当前状态
-bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh status
+bash scripts/dynamic_smt_tune.sh status
 
 # 回退
-bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh rollback
+bash scripts/dynamic_smt_tune.sh rollback
 ```
 
 ---
 
-## tuning.sh 动态生成说明
+## tuning.sh 动态生成说明（参考：协调器执行）
 
-### 生成目的
+> **⚠️ 职责说明**：本节为协调器 `opentunex-scenario-tuning` 生成入口脚本时使用的参考模板。**本子技能不执行此步骤**——脚本目录与 `tuning.sh` 由协调器统一创建（见协调器 SKILL.md 步骤 4）。本节保留是为了让子技能输出契约中的 `output.summary` 字段能准确说明脚本模板与基础脚本名，方便协调器引用。
 
-生成一份独立的、可执行的 `tuning.sh` 调优脚本，供用户或 oeaware 插件在实际环境中执行。
+### 入口脚本目录结构
 
-### 生成流程
+协调器会按以下结构创建脚本目录：
 
-1. 读取瓶颈分析结果中的推荐参数（threshold）
-2. 校验参数有效性（root 权限、sched_features 可写、sched_util_ratio 可写、threshold 范围）
-3. 生成包含完整调优、验证、回滚逻辑的 bash 脚本
+```
+${WORK_DIR}/tuning/opentunex-dynamic-smt-tuning/
+├── tuning.sh              # 入口脚本（动态生成）
+└── dynamic_smt_tune.sh    # 基础脚本（从本技能 scripts/ 复制）
+```
+
+### 动态参数（用于协调器生成 tuning.sh）
+
+协调器生成 `tuning.sh` 时需要以下参数（由本技能输出契约 `output.summary` 字段提供）：
+
+| 参数 | 含义 | 来源 |
+|------|------|------|
+| threshold | sched_util_ratio 推荐值 | 瓶颈分析结果 |
 
 ### 报告中的脚本路径
 
 - `${WORK_DIR}/tuning/intermediate/dynamic-smt-tuning.md` — 中间态调优建议
-- `scripts/dynamic-smt-tuning/dynamic_smt_tune.sh` — 执行脚本
+- `scripts/dynamic_smt_tune.sh` — 执行脚本（技能内）
 
 ---
 
@@ -135,7 +162,7 @@ bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh rollback
 
 #### Step 1.1: 读取分析结果数据
 
-从 <report_dir> 目录读取瓶颈分析报告 result.md。
+从 &lt;report_dir&gt; 目录读取瓶颈分析报告 result.md。
 
 #### Step 1.2: 前置检查
 
@@ -175,13 +202,15 @@ bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh rollback
     └── 输出: "Disabled dynamic_smt_tune, restored original sched_util_ratio if backup existed"
 ```
 
+远端模式：上述 `${WORK_DIR}/tuning/opentunex-dynamic-smt-tuning/sched_util_ratio.bak` 备份文件由生成的 tuning.sh 在远端服务器上创建/写入（用户在远端执行），agent 不得在本地创建这些文件。
+
 #### 2.3 中间态调优建议
 
-依据 [中间态建议模板](../intermediate-report-template.md) 模板，生成结构化的中间态调优建议，包含：瓶颈点列表、调优手段、调优步骤命令、预期收益、回滚方案。
+依据 `references/intermediate-report-template.md` 模板，生成结构化的中间态调优建议，包含：瓶颈点列表、调优手段、调优步骤命令、预期收益、回滚方案。
 
 ### Phase 3: 报告输出
 
-- 输出路径：`<intermediate_path>/dynamic-smt-tuning.md`
+- 输出路径：`<intermediate_path>/dynamic-smt-tuning.md`（远端模式：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端该路径；禁止在 agent 本地创建 `${WORK_DIR}` 目录）
 - 报告包含调优生效验证命令和期望结果
 
 ---
@@ -207,6 +236,8 @@ bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh rollback
 | 执行计划预览 | `apply` 前输出将要执行的操作明细，等待用户确认 `(y/N)` |
 | 状态备份 | 记录操作前的 `KEEP_ON_CORE` 状态和 `sched_util_ratio` 值到 `${WORK_DIR}/tuning/opentunex-dynamic-smt-tuning/backup_<ts>.lst` |
 | 幂等操作 | 若 `KEEP_ON_CORE` 已启用则跳过写入，避免重复操作 |
+
+远端模式：上述备份文件（`sched_util_ratio.bak`、`backup_<ts>.lst`）由生成的 tuning.sh 在远端服务器上创建/写入（用户在远端经 ssh 执行），agent 不得在本地创建这些文件。
 
 ---
 
@@ -246,11 +277,11 @@ grep -E 'KEEP_ON_CORE|NO_KEEP_ON_CORE' /sys/kernel/debug/sched/features
 ### 回滚方法
 
 ```bash
-# 通过本指南脚本回滚
-bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh rollback
+# 通过本 skill 回滚
+bash scripts/dynamic_smt_tune.sh rollback
 
 # 或通过 oeaware（如已集成）
-bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh oeaware disable
+bash scripts/dynamic_smt_tune.sh oeaware disable
 ```
 
 ---
@@ -281,10 +312,10 @@ KEEP_ON_CORE 与 sched_util_ratio 为配套参数，KEEP_ON_CORE 必须配合 sc
 
 ```bash
 # 通过 oeaware 使能
-bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh oeaware enable 90
+bash scripts/dynamic_smt_tune.sh oeaware enable 90
 
 # 通过 oeaware 禁用
-bash scripts/dynamic-smt-tuning/dynamic_smt_tune.sh oeaware disable
+bash scripts/dynamic_smt_tune.sh oeaware disable
 ```
 
 生成的 oeaware 配置文件内容：
@@ -301,7 +332,7 @@ parameters:
 
 ## 与场景分析 skill 的协作
 
-本指南接收 `opentunex-dynamic-smt-analysis` 输出的中间态调优建议：
+本 skill 接收 `opentunex-dynamic-smt-analysis` 输出的中间态调优建议：
 
 ```
 瓶颈分析 skill 输出:
@@ -309,7 +340,7 @@ parameters:
     └─ 推荐参数 (threshold)
           │
           ▼
-本指南:
+本 skill:
   解析推荐参数 → 前置检查 → 使能/回退 → 输出执行日志
 ```
 
@@ -328,7 +359,7 @@ parameters:
 
 ## 契约输出
 
-输出契约格式参见 [contract-spec.md](../contract-spec.md)，本指南特有字段：
+输出契约格式参见 [contract-spec.md](../references/contract-spec.md)，本技能特有字段：
 
 ```yaml
 skill_name: "opentunex-dynamic-smt-tuning"
@@ -339,4 +370,3 @@ input:
 output:
   intermediate_path: "[actual intermediate_path]"
 constraints_acknowledged: [ST-01~ST-04]
-```

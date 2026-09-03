@@ -1,4 +1,9 @@
-# 分域调度调优指南
+---
+name: "opentunex-soft-domain-tuning"
+description: "分域调度调优建议。基于瓶颈分析结果，生成启用SOFT_DOMAIN特性并配置cgroup软调度域参数的调优建议报告，降低跨NUMA调度与访存抖动（仅aarch64）。**必须使用此技能**：当瓶颈分析显示NUMA拓扑适合分域调度、存在小配额多实例容器/跨NUMA进程、需要启用SOFT_DOMAIN特性时。触发关键词：SOFT_DOMAIN、soft_domain、分域调度、软调度域、跨NUMA漫游、NUMA亲和、cgroup软域。"
+---
+
+# opentunex-soft-domain-tuning（分域调度）
 
 ## 目标
 
@@ -13,24 +18,35 @@
 
 ## 强制约束
 
-> 本指南遵守 [场景调优子技能共享约束](../common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
+> 本技能遵守 [场景调优子技能共享约束](../references/common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
 
-本指南依据 [中间态建议模板](../intermediate-report-template.md) 生成结构化的中间态调优建议。
+本技能依据 `references/intermediate-report-template.md` 模板生成结构化的中间态调优建议。
 
 ### 数据目录约束
 
 - **读取路径**：从 `${WORK_DIR}/analysis/` 下查找包含分域调度相关分析结论的 `result.md` 文件
 - **查找命令示例**：
 ```bash
+# 远端模式: ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name \"result.md\" ..." 在远端执行；本地模式直接执行
 RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "SOFT_DOMAIN\|soft_domain\|软调度域\|跨NUMA漫游\|NUMA亲和" {} \; | head -1)
 ```
 - **数据缺失处理**：如果 `${WORK_DIR}/analysis/` 目录不存在或未找到相关分析结果数据，必须明确提醒用户：**需要先完成瓶颈分析后才能生成调优建议**，不可在无分析数据的情况下直接调优
 
 ---
 
+### 执行模式与 `${WORK_DIR}` 语义（核心）
+
+- 输入契约携带 `execution_context`（`execution_mode` / `user` / `ip`）。**远端模式**（execution_mode=remote）：`${WORK_DIR}` 是**远端服务器上**的路径：
+  - 读取融合报告/分析结果：经 ssh 在远端读取（`ssh -q ${user}@${ip} "grep/cat <远端文件>"`），**禁止** scp 拷回本地；下方 `find ${WORK_DIR}/analysis/ ...` 等命令在远端模式下必须写为 `ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name result.md ..."` 形式
+  - 写入中间态建议/契约到 `${WORK_DIR}/tuning/...`：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端路径；**禁止**在 agent 本地创建 `${WORK_DIR}` 目录
+  - **本技能不创建脚本目录**：本技能仅产出中间态建议（`${WORK_DIR}/tuning/intermediate/soft-domain-tuning.md`）与输出契约；调优脚本目录 `${WORK_DIR}/tuning/soft-domain-tuning/` 由协调器 `opentunex-scenario-tuning` 在步骤 4 统一创建（从本技能 `scripts/` 复制基础脚本 + 生成 `tuning.sh`）。本技能**不再**负责脚本部署与入口脚本生成
+  - 本技能**不执行**调优命令（遵守 T-01/T-02）：`bash scripts/soft_domain_tune.sh ...` 与 `echo X > /sys/...` 等命令出现在生成的脚本/报告中，由**用户确认后在远端服务器上执行**；agent 不通过 ssh 代执行
+- **本地模式**（execution_mode=local）：`${WORK_DIR}` 为 agent 本地目录，脚本部署与文件操作为本地操作。
+- 具体写法见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`。
+
 ## 输入约定
 
-本指南的数据来源是**瓶颈分析结果**。
+本技能的数据来源是**瓶颈分析结果**。
 
 | 输入数据 | 必需 | 说明 |
 |---------|------|------|
@@ -86,43 +102,44 @@ RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "SOFT_D
 ### 基础脚本调用
 
 ```bash
-cd skills/optimization/opentunex-scenario-tuning
+# 本地路径：定位基础脚本源文件用（skill 目录在 agent 主机上）；远端模式拷贝目标为远端 ${WORK_DIR}/tuning/soft-domain-tuning/
+cd skills/optimization/opentunex-scenario-tuning/opentunex-soft-domain-tuning
 
 # 环境检查
-bash scripts/soft-domain-tuning/soft_domain_tune.sh check docker myapp-SC
-bash scripts/soft-domain-tuning/soft_domain_tune.sh check process "redis-*"
+bash scripts/soft_domain_tune.sh check docker myapp-SC
+bash scripts/soft_domain_tune.sh check process "redis-*"
 
 # 备份
-bash scripts/soft-domain-tuning/soft_domain_tune.sh backup docker myapp
+bash scripts/soft_domain_tune.sh backup docker myapp
 
 # 应用调优（CPU_NUM=0 时使用容器配额值）
-bash scripts/soft-domain-tuning/soft_domain_tune.sh apply docker myapp          # 自动计算配额 CPU 数
-bash scripts/soft-domain-tuning/soft_domain_tune.sh apply docker myapp 8        # 指定 8 核软域
-bash scripts/soft-domain-tuning/soft_domain_tune.sh apply process "redis-*" 8   # 进程模式需指定 cp_num
+bash scripts/soft_domain_tune.sh apply docker myapp          # 自动计算配额 CPU 数
+bash scripts/soft_domain_tune.sh apply docker myapp 8        # 指定 8 核软域
+bash scripts/soft_domain_tune.sh apply process "redis-*" 8   # 进程模式需指定 cp_num
 
 # 查看状态
-bash scripts/soft-domain-tuning/soft_domain_tune.sh status docker
-bash scripts/soft-domain-tuning/soft_domain_tune.sh status process "redis-*"
+bash scripts/soft_domain_tune.sh status docker
+bash scripts/soft_domain_tune.sh status process "redis-*"
 
 # 回滚
-bash scripts/soft-domain-tuning/soft_domain_tune.sh rollback
+bash scripts/soft_domain_tune.sh rollback
 ```
 
 ---
 
-## tuning.sh 动态生成说明
+## tuning.sh 动态生成说明（参考：协调器执行）
 
-### 脚本组织规范
+> **⚠️ 职责说明**：本节为协调器 `opentunex-scenario-tuning` 生成入口脚本时使用的参考模板。**本子技能不执行此步骤**——脚本目录与 `tuning.sh` 由协调器统一创建（见协调器 SKILL.md 步骤 4）。本节保留是为了让子技能输出契约中的 `output.summary` 字段能准确说明脚本模板与基础脚本名，方便协调器引用。
 
-根据最新的调优报告规范，每个调优方向的脚本需要组织为独立文件夹，包含：
-- **入口脚本 `tuning.sh`**：动态生成，包含针对当前瓶颈的动态参数
-- **基础脚本**：从 `scripts/` 目录复制的原始脚本
+### 入口脚本目录结构
 
-### 生成流程
+协调器会按以下结构创建脚本目录：
 
-1. **创建调优技能文件夹**：在报告输出目录下创建 `soft-domain-tuning/` 文件夹
-2. **复制基础脚本**：将 `scripts/soft-domain-tuning/soft_domain_tune.sh` 复制到该文件夹
-3. **生成入口脚本 `tuning.sh`**：根据当前瓶颈分析结果，动态生成入口脚本
+```
+${WORK_DIR}/tuning/soft-domain-tuning/
+├── tuning.sh              # 入口脚本（动态生成）
+└── soft_domain_tune.sh    # 基础脚本（从本技能 scripts/ 复制）
+```
 
 ### tuning.sh 模板
 
@@ -247,11 +264,11 @@ esac
 
 #### 2.3 中间态调优建议
 
-依据 [中间态建议模板](../intermediate-report-template.md) 模板，生成结构化的中间态调优建议，包含：瓶颈点列表、调优手段、调优步骤命令、预期收益、回滚方案。
+依据 `references/intermediate-report-template.md` 模板，生成结构化的中间态调优建议，包含：瓶颈点列表、调优手段、调优步骤命令、预期收益、回滚方案。
 
 ### Phase 3: 报告输出
 
-将生成的中间态调优建议保存至：
+将生成的中间态调优建议保存至：（远端模式：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端该路径；禁止在 agent 本地创建 `${WORK_DIR}` 目录）
 ```
 ${WORK_DIR}/tuning/intermediate/soft-domain-tuning.md
 ```
@@ -262,6 +279,8 @@ ${WORK_DIR}/tuning/soft-domain-tuning/
 ├── tuning.sh              # 动态生成的入口脚本
 └── soft_domain_tune.sh    # 复制的基础脚本
 ```
+
+> **⚠️ 职责说明**：上述目录由协调器 `opentunex-scenario-tuning` 在步骤 4 创建，本子技能仅产出中间态建议，不负责脚本部署。
 
 ---
 
@@ -274,6 +293,8 @@ ${WORK_DIR}/tuning/soft-domain-tuning/
 | 操作前自动备份 | `apply` 在用户确认后自动执行 `backup`，保存当前 sched_features 状态和 cgroup 值到 `${WORK_DIR}/tuning/opentunex-soft-domain-tuning/backup_<ts>.lst` |
 | 回滚脚本生成 | `apply` 成功后自动生成 `${WORK_DIR}/tuning/opentunex-soft-domain-tuning/rollback_soft_domain.sh`，可独立执行回滚 |
 | 只改目标范围 | `rollback` 仅清空受影响的 cgroup 文件，不触碰无关配置 |
+
+远端模式：上述备份/回滚文件（`backup_<ts>.lst`、`rollback_soft_domain.sh`）由生成的 tuning.sh / soft_domain_tune.sh 在远端服务器上创建/写入（用户在远端经 ssh 执行），agent 不得在本地创建这些文件。
 
 ---
 
@@ -314,11 +335,11 @@ CPU宽度: 0 (0=使用配额值)
 1. 使用自动生成的回滚脚本：
    bash ${WORK_DIR}/tuning/opentunex-soft-domain-tuning/rollback_soft_domain.sh
 
-2. 或通过本指南的 rollback 命令：
-   bash scripts/soft-domain-tuning/soft_domain_tune.sh rollback
+2. 或通过本 skill 的 rollback 命令：
+   bash scripts/soft_domain_tune.sh rollback
 
 3. 或通过 oeaware（如已集成）：
-   bash scripts/soft-domain-tuning/soft_domain_tune.sh oeaware rollback
+   bash scripts/soft_domain_tune.sh oeaware rollback
 ```
 
 ---
@@ -350,10 +371,10 @@ SOFT_DOMAIN 与 PARAL 均为 NUMA 相关的调度特性：
 
 ```bash
 # 生成 /etc/oeAware/plugin/soft_domain.yaml 并使能
-bash scripts/soft-domain-tuning/soft_domain_tune.sh oeaware enable myapp 0
+bash scripts/soft_domain_tune.sh oeaware enable myapp 0
 
 # 禁用并删除配置
-bash scripts/soft-domain-tuning/soft_domain_tune.sh oeaware rollback
+bash scripts/soft_domain_tune.sh oeaware rollback
 ```
 
 生成的 oeaware 配置文件内容：
@@ -373,7 +394,7 @@ parameters:
 
 ## 与场景分析 skill 的协作
 
-本指南接收 `opentunex-soft-domain-analysis` 输出的中间态调优建议：
+本 skill 接收 `opentunex-soft-domain-analysis` 输出的中间态调优建议：
 
 ```
 瓶颈分析 skill 输出:
@@ -381,7 +402,7 @@ parameters:
     └─ 推荐参数 (mode, whitelist, cpu_num)
           │
           ▼
-本指南:
+本 skill:
   解析推荐参数 → 参数校验 → 使能/回退 → 输出执行日志
 ```
 
@@ -404,7 +425,7 @@ parameters:
 
 ## 契约输出
 
-输出契约格式参见 [contract-spec.md](../contract-spec.md)，本指南特有字段：
+输出契约格式参见 [contract-spec.md](../references/contract-spec.md)，本技能特有字段：
 
 ```yaml
 skill_name: "opentunex-soft-domain-tuning"
@@ -415,4 +436,3 @@ input:
 output:
   intermediate_path: "[actual intermediate_path]"
 constraints_acknowledged: [ST-01~ST-04]
-```

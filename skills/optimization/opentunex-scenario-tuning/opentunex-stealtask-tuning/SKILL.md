@@ -1,4 +1,9 @@
-# 窃取任务调优指南
+---
+name: "opentunex-stealtask-tuning"
+description: "窃取任务调优建议。基于瓶颈分析结果，生成启用STEAL特性的调优建议报告，在高负载场景下实现多核间快速负载均衡提升调度成功率（仅aarch64）。**必须使用此技能**：当瓶颈分析显示CPU高负载、负载不均衡、调度成功率低、需要启用STEAL特性时。触发关键词：STEAL、窃取任务、负载均衡、CPU高负载、调度优化、sched_features、aarch64架构调度优化。"
+---
+
+# 窃取任务调优建议
 
 启用窃取任务（stealtask）调度特性，让空闲CPU主动从繁忙CPU拉取任务，提升多核负载均衡效率。
 
@@ -6,23 +11,34 @@
 
 ## 强制约束
 
-> 本指南遵守 [场景调优子技能共享约束](../common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
+> 本技能遵守 [场景调优子技能共享约束](../references/common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
 
-本指南依据 [中间态建议模板](../intermediate-report-template.md) 生成结构化的中间态调优建议。
+本技能依据 `references/intermediate-report-template.md` 模板生成结构化的中间态调优建议。
 
 ### 数据目录约束
 
 - **读取路径**：从 `${WORK_DIR}/analysis/` 下查找包含窃取任务调度相关分析结论的 `result.md` 文件
 - **查找命令示例**：
 ```bash
+# 远端模式: ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name \"result.md\" ..." 在远端执行；本地模式直接执行
 RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "STEAL\|stealtask\|窃取" {} \; | head -1)
 ```
 
 ---
 
+### 执行模式与 `${WORK_DIR}` 语义（核心）
+
+- 输入契约携带 `execution_context`（`execution_mode` / `user` / `ip`）。**远端模式**（execution_mode=remote）：`${WORK_DIR}` 是**远端服务器上**的路径：
+  - 读取融合报告/分析结果：经 ssh 在远端读取（`ssh -q ${user}@${ip} "grep/cat <远端文件>"`），**禁止** scp 拷回本地；下方 `find ${WORK_DIR}/analysis/ ...` 等命令在远端模式下必须写为 `ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name result.md ..."` 形式
+  - 写入中间态建议/契约到 `${WORK_DIR}/tuning/...`：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端路径；**禁止**在 agent 本地创建 `${WORK_DIR}` 目录
+  - **本技能不创建脚本目录**：本技能仅产出中间态建议（`${WORK_DIR}/tuning/intermediate/stealtask-tuning.md`）与输出契约；调优脚本目录 `${WORK_DIR}/tuning/stealtask-tuning/` 由协调器 `opentunex-scenario-tuning` 在步骤 4 统一创建（从本技能 `scripts/` 复制基础脚本 + 生成 `tuning.sh`）。本技能**不再**负责脚本部署与入口脚本生成
+  - 本技能**不执行**调优命令（遵守 T-01/T-02）：`bash scripts/stealtask_tune.sh ...` 与 `echo X > /sys/...` 等命令出现在生成的脚本/报告中，由**用户确认后在远端服务器上执行**；agent 不通过 ssh 代执行
+- **本地模式**（execution_mode=local）：`${WORK_DIR}` 为 agent 本地目录，脚本部署与文件操作为本地操作。
+- 具体写法见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`。
+
 ## 输入约定
 
-本指南的数据来源是**瓶颈分析结果**。
+本技能的数据来源是**瓶颈分析结果**。
 
 | 输入数据 | 必需 | 说明 |
 |---------|------|------|
@@ -91,33 +107,33 @@ RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "STEAL\
 
 ### 基础脚本调用
 
-本指南依赖 `scripts/stealtask-tuning/stealtask_tune.sh` 脚本完成调优操作。脚本支持以下操作：
+本技能依赖 `scripts/stealtask_tune.sh` 脚本完成调优操作。脚本支持以下操作：
 
 | 操作 | 命令 | 说明 |
 |------|------|------|
-| 环境检查 | `bash scripts/stealtask-tuning/stealtask_tune.sh check` | 检查sched_features文件是否存在且可写 |
-| 状态备份 | `bash scripts/stealtask-tuning/stealtask_tune.sh backup` | 备份当前STEAL状态和cmdline配置 |
-| 应用调优 | `bash scripts/stealtask-tuning/stealtask_tune.sh apply` | 启用STEAL特性（cmdline需手动配置） |
-| 查看状态 | `bash scripts/stealtask-tuning/stealtask_tune.sh status` | 查看当前STEAL状态和cmdline配置 |
-| 回滚 | `bash scripts/stealtask-tuning/stealtask_tune.sh rollback` | 恢复最近一次备份的状态 |
+| 环境检查 | `bash scripts/stealtask_tune.sh check` | 检查sched_features文件是否存在且可写 |
+| 状态备份 | `bash scripts/stealtask_tune.sh backup` | 备份当前STEAL状态和cmdline配置 |
+| 应用调优 | `bash scripts/stealtask_tune.sh apply` | 启用STEAL特性（cmdline需手动配置） |
+| 查看状态 | `bash scripts/stealtask_tune.sh status` | 查看当前STEAL状态和cmdline配置 |
+| 回滚 | `bash scripts/stealtask_tune.sh rollback` | 恢复最近一次备份的状态 |
 
 > **⚠️ 说明**：调优报告中的"调优步骤"展示独立命令，目的是让用户了解具体做了什么操作、修改了哪些文件。实际执行时建议使用入口脚本 `tuning.sh`，脚本会自动完成环境检查、状态备份、调优执行、验证和回滚，并自适应 sched_features 路径。
 
 ---
 
-## tuning.sh 动态生成说明
+## tuning.sh 动态生成说明（参考：协调器执行）
 
-### 生成目的
+> **⚠️ 职责说明**：本节为协调器 `opentunex-scenario-tuning` 生成入口脚本时使用的参考模板。**本子技能不执行此步骤**——脚本目录与 `tuning.sh` 由协调器统一创建（见协调器 SKILL.md 步骤 4）。本节保留是为了让子技能输出契约中的 `output.summary` 字段能准确说明脚本模板与基础脚本名，方便协调器引用。
 
-根据最新的调优报告规范，每个调优方向的脚本需要组织为独立文件夹，包含：
-- **入口脚本 `tuning.sh`**：动态生成，包含针对当前瓶颈的动态参数
-- **基础脚本**：从 `scripts/` 目录复制的原始脚本
+### 入口脚本目录结构
 
-### 生成流程
+协调器会按以下结构创建脚本目录：
 
-1. **创建调优技能文件夹**：在报告输出目录下创建 `stealtask-tuning/` 文件夹
-2. **复制基础脚本**：将 `scripts/stealtask-tuning/stealtask_tune.sh` 复制到该文件夹
-3. **生成入口脚本 `tuning.sh`**：根据当前瓶颈分析结果，动态生成入口脚本
+```
+${WORK_DIR}/tuning/stealtask-tuning/
+├── tuning.sh              # 入口脚本（动态生成）
+└── stealtask_tune.sh      # 基础脚本（从本技能 scripts/ 复制）
+```
 
 ### tuning.sh 模板
 
@@ -178,8 +194,10 @@ esac
 #### Step 1.1: 读取分析结果数据
 
 ```bash
+# 远端模式: ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name \"result.md\" ..." 在远端执行；本地模式直接执行
 RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "STEAL\|stealtask\|窃取" {} \; | head -1)
 if [ -n "$RESULT_FILE" ]; then
+    # 远端模式: ssh -q ${user}@${ip} "cat <RESULT_FILE路径>" 流回上下文；禁止 scp 拷回本地
     cat "$RESULT_FILE"
 ```
 
@@ -229,7 +247,7 @@ if [ -n "$RESULT_FILE" ]; then
 
 ### Phase 2: 生成中间态调优建议
 
-依据 [中间态建议模板](../intermediate-report-template.md) 模板生成报告，按以下要求填充各字段：
+依据 `references/intermediate-report-template.md` 模板生成报告，按以下要求填充各字段：
 
 #### 2.1 瓶颈点列表填充
 
@@ -333,7 +351,7 @@ echo 0 > /sys/fs/cgroup/cpu/<cgroup>/cpu.steal_task
 
 ### Phase 3: 报告输出
 
-将生成的中间态调优建议保存至：
+将生成的中间态调优建议保存至：（远端模式：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端该路径；禁止在 agent 本地创建 `${WORK_DIR}` 目录）
 ```
 ${WORK_DIR}/tuning/intermediate/stealtask-tuning.md
 ```
@@ -345,6 +363,8 @@ ${WORK_DIR}/tuning/stealtask-tuning/
 ├── tuning.sh              # 动态生成的入口脚本
 └── stealtask_tune.sh      # 复制的基础脚本
 ```
+
+> **⚠️ 职责说明**：上述目录由协调器 `opentunex-scenario-tuning` 在步骤 4 创建，本子技能仅产出中间态建议，不负责脚本部署。
 
 **注意**：本文件是中间态数据，最终将由调优域入口汇总为一份完整的调优建议报告。
 
@@ -364,7 +384,7 @@ ${WORK_DIR}/tuning/stealtask-tuning/
 
 ## 冲突约束
 
-> **⚠️ 以下冲突约束由调优域入口统一处理，本指南无需处理。**
+> **⚠️ 以下冲突约束由调优域入口统一处理，本技能无需处理。**
 
 | 调优方向A | 调优方向B | 冲突资源 | 执行策略 |
 |----------|----------|---------|---------|
@@ -375,7 +395,7 @@ ${WORK_DIR}/tuning/stealtask-tuning/
 
 ## 契约输出
 
-输出契约格式参见 [contract-spec.md](../contract-spec.md)，本指南特有字段：
+输出契约格式参见 [contract-spec.md](../references/contract-spec.md)，本技能特有字段：
 
 ```yaml
 skill_name: "opentunex-stealtask-tuning"
@@ -386,4 +406,3 @@ input:
 output:
   intermediate_path: "[actual intermediate_path]"
 constraints_acknowledged: [ST-01~ST-04]
-```
