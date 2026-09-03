@@ -32,79 +32,87 @@ extract_cpu_info() {
 
     [[ ! -f "$cfile" ]] && { echo "$cpu_usage $smt_active"; return; }
 
-    # ---- CPU_USAGE: 从 /proc/stat 多采样节计算 ----
-    # 用 awk 状态跟踪跳过 === SAMPLE 块（sed 的 /^=== / 终止模式会误匹配 SAMPLE 标题行）
-    local proc_stat_section
-    proc_stat_section=$(awk '
-        /\/proc\/stat.*多采样/             { in_section=1; next }
-        in_section && /^=== / && !/^=== SAMPLE/ { exit }
-        in_section                         { print }
-    ' "$cfile" 2>/dev/null || true)
-    if [[ -z "$proc_stat_section" ]]; then
-        proc_stat_section=$(awk '
-            /^===.*\/proc\/stat/           { in_section=1; next }
-            in_section && /^=== / && !/^=== SAMPLE/ { exit }
-            in_section                     { print }
-        ' "$cfile" 2>/dev/null || true)
+    # ---- CPU_USAGE ----
+    # 优先从 mpstat "Average: all" 行: 100 - idle%
+    local avg_line
+    local cpu_source="${DATA_DIR}/global_bottleneck.txt"
+    avg_line=$(grep -E '^Average:\s+all' "$cpu_source" 2>/dev/null | head -1 || true)
+    if [[ -z "$avg_line" ]]; then
+        avg_line=$(grep -E '^平均:\s+all' "$cpu_source" 2>/dev/null | head -1 || true)
     fi
-    if [[ -z "$proc_stat_section" ]]; then
-        proc_stat_section=$(awk '
-            /^---.*\/proc\/stat/           { in_section=1; next }
-            in_section && /^--- / && !/^--- SAMPLE/ { exit }
-            in_section                     { print }
-        ' "$cfile" 2>/dev/null || true)
-    fi
-    if [[ -z "$proc_stat_section" ]]; then
-        proc_stat_section=$(sed -n '/\/proc\/stat/,/^$/p' "$cfile" 2>/dev/null || true)
-    fi
-
-    if [[ -n "$proc_stat_section" ]]; then
-        local -a cpu_utilizations=()
-        local -a cpu_lines=()
-        while IFS= read -r line; do
-            if [[ "$line" =~ ^cpu\  ]]; then
-                cpu_lines+=("$line")
-            fi
-        done <<< "$proc_stat_section"
-
-        # 相邻两两采样计算利用率
-        local i
-        for ((i=1; i<${#cpu_lines[@]}; i++)); do
-            local prev=(${cpu_lines[$((i-1))]})
-            local curr=(${cpu_lines[$i]})
-            local delta_total=0 delta_idle=0
-            local j
-            for ((j=1; j<8; j++)); do
-                local d=$(( ${curr[$j]:-0} - ${prev[$j]:-0} ))
-                ((delta_total += d))
-                # idle=第4列(索引4), iowait=第5列(索引5)
-                ((j == 4 || j == 5)) && ((delta_idle += d))
-            done
-            if ((delta_total > 0)); then
-                local util
-                util=$(awk "BEGIN {printf \"%.2f\", ($delta_total - $delta_idle) / $delta_total * 100}")
-                cpu_utilizations+=("$util")
-            fi
-        done
-
-        if ((${#cpu_utilizations[@]} > 0)); then
-            local sum=0
-            for u in "${cpu_utilizations[@]}"; do
-                sum=$(awk "BEGIN {print $sum + $u}")
-            done
-            cpu_usage=$(awk "BEGIN {printf \"%.2f\", $sum / ${#cpu_utilizations[@]}}")
+    if [[ -n "$avg_line" ]]; then
+        # mpstat 列: CPU %usr %nice %sys %iowait %irq %soft %steal %guest %gnice %idle
+        # Average: all xxx xxx xxx xxx xxx xxx xxx xxx xxx xx.xx
+        local idle
+        idle=$(echo "$avg_line" | awk '{print $NF}' 2>/dev/null || true)
+        if [[ -n "$idle" ]]; then
+            cpu_usage=$(awk "BEGIN {printf \"%.2f\", 100 - $idle}")
         fi
     fi
 
-    # 回退：从 mpstat Average: all 行
+    # ---- CPU_USAGE: 从 /proc/stat 多采样节计算 ----
+    # 用 awk 状态跟踪跳过 === SAMPLE 块（sed 的 /^=== / 终止模式会误匹配 SAMPLE 标题行）
+    # 回退：从 /proc/stat cpu 行计算
     if [[ "$cpu_usage" == "0" || -z $(echo "$cpu_usage" | tr -d '0.') ]]; then
-        local avg_line
-        avg_line=$(grep -E '^Average:\s+all' "$cfile" 2>/dev/null | head -1 || true)
-        if [[ -n "$avg_line" ]]; then
-            local idle
-            idle=$(echo "$avg_line" | awk '{print $NF}')
-            if [[ -n "$idle" ]]; then
-                cpu_usage=$(awk "BEGIN {printf \"%.2f\", 100 - $idle}")
+        local proc_stat_section
+        proc_stat_section=$(awk '
+            /\/proc\/stat.*多采样/             { in_section=1; next }
+            in_section && /^=== \/(proc|mp)/   { exit }
+            in_section                         { print }
+        ' "$cfile" 2>/dev/null || true)
+        if [[ -z "$proc_stat_section" ]]; then
+            proc_stat_section=$(awk '
+                /^===.*\/proc\/stat/           { in_section=1; next }
+                in_section && /^=== \/(proc|mp)/   { exit }
+                in_section                     { print }
+            ' "$cfile" 2>/dev/null || true)
+        fi
+        if [[ -z "$proc_stat_section" ]]; then
+            proc_stat_section=$(awk '
+                /^---.*\/proc\/stat/           { in_section=1; next }
+                in_section && /^=== \/(proc|mp)/   { exit }
+                in_section                     { print }
+            ' "$cfile" 2>/dev/null || true)
+        fi
+        if [[ -z "$proc_stat_section" ]]; then
+            proc_stat_section=$(sed -n '/\/proc\/stat/,/^$/p' "$cfile" 2>/dev/null || true)
+        fi
+
+        if [[ -n "$proc_stat_section" ]]; then
+            local -a cpu_utilizations=()
+            local -a cpu_lines=()
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^cpu\  ]]; then
+                    cpu_lines+=("$line")
+                fi
+            done <<< "$proc_stat_section"
+
+            # 相邻两两采样计算利用率
+            local i
+            for ((i=1; i<${#cpu_lines[@]}; i++)); do
+                local prev=(${cpu_lines[$((i-1))]})
+                local curr=(${cpu_lines[$i]})
+                local delta_total=0 delta_idle=0
+                local j
+                for ((j=1; j<8; j++)); do
+                    local d=$(( ${curr[$j]:-0} - ${prev[$j]:-0} ))
+                    ((delta_total += d))
+                    # idle=第4列(索引4), iowait=第5列(索引5)
+                    ((j == 4 || j == 5)) && ((delta_idle += d))
+                done
+                if ((delta_total > 0)); then
+                    local util
+                    util=$(awk "BEGIN {printf \"%.2f\", ($delta_total - $delta_idle) / $delta_total * 100}")
+                    cpu_utilizations+=("$util")
+                fi
+            done
+
+            if ((${#cpu_utilizations[@]} > 0)); then
+                local sum=0
+                for u in "${cpu_utilizations[@]}"; do
+                    sum=$(awk "BEGIN {print $sum + $u}")
+                done
+                cpu_usage=$(awk "BEGIN {printf \"%.2f\", $sum / ${#cpu_utilizations[@]}}")
             fi
         fi
     fi

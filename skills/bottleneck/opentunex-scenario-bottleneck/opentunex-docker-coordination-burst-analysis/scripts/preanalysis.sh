@@ -37,13 +37,13 @@ extract_host_cpu_info() {
     local proc_stat_section
     proc_stat_section=$(awk '
         /\/proc\/stat.*多采样/            { in_section=1; next }
-        in_section && /^=== / && !/^=== SAMPLE/ { exit }
+        in_section && /^=== \/(proc|mp)/  { exit }
         in_section                        { print }
     ' "$cfile" 2>/dev/null || true)
     if [[ -z "$proc_stat_section" ]]; then
         proc_stat_section=$(awk '
             /\/proc\/stat/                { in_section=1; next }
-            in_section && /^=== / && !/^=== SAMPLE/ { exit }
+            in_section && /^=== \/(proc|mp)/  { exit }
             in_section                    { print }
         ' "$cfile" 2>/dev/null || true)
     fi
@@ -85,7 +85,7 @@ extract_host_cpu_info() {
     fi
 
     # 回退：从 mpstat Average: all 行
-    if [[ "$host_cpu_util" == "0" || -z $(echo "$host_cpu_util" | tr -d '0.') ]]; then
+    if [[ "$host_cpu_util" == "0" || "$host_cpu_util" == "0.00" || -z "${host_cpu_util//[0.]/}" ]]; then
         local avg_line
         avg_line=$(grep -E '^Average:\s+all' "$cfile" 2>/dev/null | head -1 || true)
         if [[ -n "$avg_line" ]]; then
@@ -99,12 +99,12 @@ extract_host_cpu_info() {
 
     # ---- HOST_NCPUS ----
     local ncpu_line
-    ncpu_line=$(grep -oP '在线CPU数量.*?\K[0-9]+' "$cfile" 2>/dev/null | head -1 || true)
+    ncpu_line=$(grep -E '在线CPU数量' "$cfile" 2>/dev/null | head -1 | grep -oE '[0-9]+' | head -1 || true)
     if [[ -z "$ncpu_line" ]]; then
-        ncpu_line=$(grep -oP 'processor.*数量.*?\K[0-9]+' "$cfile" 2>/dev/null | head -1 || true)
+        ncpu_line=$(grep -E '^CPU\(s\):' "$cfile" 2>/dev/null | head -1 | grep -oE '[0-9]+' | head -1 || true)
     fi
     if [[ -z "$ncpu_line" ]]; then
-        ncpu_line=$(grep -oP 'CPU\(s\):\s+\K[0-9]+' "$cfile" 2>/dev/null | head -1 || true)
+        ncpu_line=$(grep -E 'On-line CPU\(s\)' "$cfile" 2>/dev/null | head -1 | grep -oE '[0-9]+' | head -1 || true)
     fi
     host_ncpus=${ncpu_line:-1}
 
@@ -224,10 +224,10 @@ extract_container_info() {
         local first_data="${first_sample_data[$cid]}"
         local last_data="${last_sample_data[$cid]}"
 
-        [[ -z "$first_data" || -z "$last_data" ]] && continue
+        [[ -z "${first_data//[[:space:]]/}" || -z "${last_data//[[:space:]]/}" ]] && continue
 
-        read -r f_usage f_ts f_period f_quota f_soft <<< "$first_data"
-        read -r l_usage l_ts l_period l_quota l_soft <<< "$last_data"
+        read -r f_usage f_ts f_period f_quota f_soft <<< "$first_data" || true
+        read -r l_usage l_ts l_period l_quota l_soft <<< "$last_data" || true
 
         # 计算时间间隔（纳秒）
         local interval_ns=0
@@ -304,18 +304,18 @@ main() {
     local CNTFILE="${DATA_DIR}/container_info.txt"
 
     # ---- 宿主机 CPU 信息 ----
-    local host_cpu_util host_ncpus
-    read -r host_cpu_util host_ncpus <<< "$(extract_host_cpu_info "$CFILE")"
+    local host_cpu_util=0 host_ncpus=1
+    read -r host_cpu_util host_ncpus <<< "$(extract_host_cpu_info "$CFILE")" || true
 
     # ---- Burst 支持 ----
-    local burst_support
+    local burst_support="不支持"
     burst_support=$(extract_burst_support "$KFILE")
 
     # ---- 容器信息 ----
-    local container_count containers_json
+    local container_count=0 containers_json="[]"
     {
-        read -r container_count
-        read -r containers_json
+        read -r container_count || true
+        read -r containers_json || true
     } <<< "$(extract_container_info "$CNTFILE" "$host_ncpus")"
 
     # ---- 构建 JSON ----
