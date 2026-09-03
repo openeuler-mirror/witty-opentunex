@@ -10,6 +10,8 @@
 
 > **路径适配**：`WORK_DIR` 默认值为 `/srv/opentunex/<YYYYMMDD_HHMMSS>`，用户可通过一键采集脚本或手动指定覆盖。下文所有路径中的 `${WORK_DIR}/` 均指工作目录根路径。
 
+> **远端场景语义**：当目标为远端服务器时（`target_host` 已填写），`${WORK_DIR}` 是远端服务器上的路径，agent 主机本地不存在该目录。所有对 `${WORK_DIR}` 的文件操作（mkdir/ls/cat/写契约/写报告/打包）必须经 `opentunex-remote-execution` 的 ssh 机制在远端执行，禁止在 agent 本地操作 `${WORK_DIR}`。详见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`。契约建议携带 `execution_context` 字段（`execution_mode` / `user` / `ip`）供下游技能判定模式。
+
 > **用户指定已有数据目录**：当用户提供了已有采集数据目录（如 `/root/profiling_data_aarch64_20260519_150038/`）时，`WORK_DIR` 为该动态目录路径，分析结果和调优产出将统一存放于该目录下。这种情况下不需要再进行采集，直接进行瓶颈分析和调优。
 
 ## 输入契约（主智能体 → 子智能体）

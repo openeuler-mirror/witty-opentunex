@@ -7,6 +7,41 @@ description: Remote execution framework for client-server analysis. Provides sta
 
 This skill provides standardized client connection and command execution capabilities. It should be referenced by all skills that need to execute commands on remote client machines.
 
+**The remote client is expected to be Linux regardless of the agent host OS.** Only the commands the agent itself runs on its local machine differ between platforms. Branches below pick the right guide file for those LOCAL commands.
+
+**Remote `${WORK_DIR}` semantics**: when the analysis target is a remote server, `${WORK_DIR}` (initialized by `witty-opentunex` as `/srv/opentunex/<YYYYMMDD_HHMMSS>/`) is a path ON THE REMOTE server. Every operation touching it must go through this skill's ssh mechanism. All skills that consume `${WORK_DIR}` MUST also load [references/work_dir_remote_semantics.md](references/work_dir_remote_semantics.md).
+
+---
+
+## Platform Detection (RUN THIS FIRST)
+
+Before doing anything else, determine which platform the agent host runs on, then load the matching reference guide. Skipping this step is the #1 cause of retry cascades on Windows — the Linux guide hard-codes paths and commands (`/opt/opentunex/...`, `ssh-copy-id`, `timeout`, heredoc) that do not exist on Windows and the agent will burn many attempts trying to invent workarounds.
+
+Run this single check, then read the indicated guide before proceeding:
+
+```bash
+# Cross-shell detection — works in PowerShell, Git Bash, and native bash.
+# - WINDIR is set by Windows for all child processes (incl. Git Bash).
+# - OS=Windows_NT is set by Git Bash. On native Linux/macOS, OS is unset
+#   or is "Linux"/"Darwin".
+if [ -n "$WINDIR" ] || { [ -n "$OS" ] && echo "$OS" | grep -qi "windows"; }; then
+    echo "WINDOWS"
+else
+    echo "LINUX"
+fi
+```
+
+```powershell
+# PowerShell-native equivalent (preferred on Windows hosts)
+if ($env:OS -match "Windows") { "WINDOWS" } else { "LINUX" }
+```
+
+**After detection:**
+- `WINDOWS` → load `references/remote_execution_guide_windows.md` and follow IT for every LOCAL command in the rest of this skill.
+- `LINUX` (or `Darwin` / anything else) → load `references/remote_execution_guide.md`. Behavior is unchanged from previous versions of this skill.
+
+Both reference files share the same conceptual structure (auth → key setup → file upload → command patterns → timeout → security → errors), so once you have picked the right one you can map sections 1:1 between them. The Windows guide exists specifically to handle the LOCAL-side syntax differences (PowerShell vs bash) and to fix the Linux-only commands that fail outright on Windows.
+
 ---
 
 ## Client Connection Setup
@@ -14,7 +49,7 @@ This skill provides standardized client connection and command execution capabil
 **CRITICAL**: Before all phases, check client connection. The client IP is provided in the user context (e.g., "analyze lock bottleneck on 192.168.1.100"). Extract the IP from user input, do NOT ask user again for IP.
 
 **setup client connection**:
-1. Extract client IP from user context (e.g., from "192.168.1.100" or "root@192.168.1.100" in user input)
+1. Extract client IP from user context (e.g., from "192.168.1.100" or "root@192.168.1.100" in user input). Default username to "root" if only an IP was given.
 2. Test passwordless SSH connection with extracted IP, if successful, setup done;
 3. If passwordless SSH connection test fails, ask user to provide correct auth info, generate public key if not existing, and copy public key to the client to ensure passwordless connection.
 
@@ -60,6 +95,16 @@ ssh -q -tt ${username}@${ip} 'cd /tmp/ && perf sched record -a -- sleep 15'
 ssh -q -tt ${username}@${ip} 'cd /tmp/ && sh analyze_script.sh'
 ```
 
+> **About the examples above:** the commands inside `ssh user@ip '...'` quotes
+> are REMOTE-side — they run on the Linux client and are correct on both agent
+> platforms. The lines that run on the LOCAL agent host (here: the `scp` of a
+> file from `/tmp/...`) are shown in Linux form for brevity. When the agent
+> host is Windows, translate `/tmp` to `$env:TEMP`, single quotes to double
+> quotes (PowerShell single-quote semantics), and `ssh-copy-id` to the manual
+> `echo pubkey >> authorized_keys` pattern. The exact LOCAL-side commands live
+> in the platform-specific reference guide picked by the Platform Detection
+> section above.
+
 **Security notes**:
 - ALL DESTRUCTIVE commands should request user's confirmation before execution
 - NEVER copy client data to local machine for analysis
@@ -80,6 +125,10 @@ Load the remote-execution skill for standardized SSH connection and command exec
 
 skill:remote-execution
 
+**Remote mode `${WORK_DIR}` semantics**: if the analysis target is a remote server,
+load `opentunex-remote-execution/references/work_dir_remote_semantics.md` and follow it:
+`${WORK_DIR}` is a REMOTE path; every command touching it runs via ssh, never locally.
+
 ---
 
 ## [Continue with your skill-specific phases]
@@ -91,4 +140,9 @@ This replaces the duplicated Client Connection and Command Execution section in 
 
 ## Reference
 
-For detailed information, see [references/remote_execution_guide.md](references/remote_execution_guide.md).
+Pick the guide that matches the platform detected at the top of this skill:
+
+- **Linux / macOS agent host** → [references/remote_execution_guide.md](references/remote_execution_guide.md)
+- **Windows agent host** → [references/remote_execution_guide_windows.md](references/remote_execution_guide_windows.md)
+
+If the platform detection snippet above reports `WINDOWS`, do NOT read the Linux guide — its `/opt/...` paths, `ssh-copy-id`, heredoc examples, and `timeout` invocations will fail on Windows and waste attention on retry loops.

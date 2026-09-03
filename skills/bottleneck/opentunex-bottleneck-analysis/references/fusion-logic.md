@@ -218,4 +218,6 @@ description: 瓶颈分析结果融合逻辑定义
 
 融合报告写入 `${WORK_DIR}/analysis/opentunex-scenario-bottleneck_collect/result.md`。
 
+远端场景：本地 Write 后 scp 上传到远端路径（`${WORK_DIR}` 为远端路径），详见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`
+
 报告输出格式见 [fusion-report-template.md](fusion-report-template.md)，按该模板填充数据生成完整报告。
