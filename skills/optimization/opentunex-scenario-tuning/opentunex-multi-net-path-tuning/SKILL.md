@@ -1,35 +1,51 @@
-# 网卡多路径调优指南
+---
+name: "opentunex-multi-net-path-tuning"
+description: "网卡多路径调优建议。基于瓶颈分析结果，生成加载网卡多路径特性模块（默认 oenetcls，部分内核命名为 venetcls）、配置多网卡中断亲和、停止irqbalance的调优建议报告，减少跨NUMA网络中断开销。**必须使用此技能**：当瓶颈分析显示多网卡多NUMA环境存在跨NUMA中断开销、oenetcls/venetcls 特性适用时。触发关键词：oenetcls、venetcls、multi_net_path_tune、ntuple、跨NUMA中断、多网卡中断亲和、网络中断优化。"
+---
+
+# 网卡多路径调优建议
 
 加载网卡多路径特性内核模块（默认 `oenetcls`，部分内核命名为 `venetcls`，由脚本自动识别），接管多网卡中断亲和分配，将网卡中断绑定到对应 NUMA 节点本地处理，减少跨 NUMA 网络中断开销。
 
 ## 强制约束
 
-> 本指南遵守 [场景调优子技能共享约束](../common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
+> 本技能遵守 [场景调优子技能共享约束](../references/common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
 
-本指南依据 [中间态建议模板](../intermediate-report-template.md) 生成结构化的中间态调优建议。
+本技能依据 `references/intermediate-report-template.md` 模板生成结构化的中间态调优建议。
 
-> **⚠️ 每次触发本指南都必须重新从头执行完整调优流程，不得引用历史数据或之前的回答。**
+> **⚠️ 每次触发本技能都必须重新从头执行完整调优流程，不得引用历史数据或之前的回答。**
 > - 即使系统状态未变化，也必须重新执行所有调优步骤
 > - 不得跳过任何调优阶段，不得复用历史调优结果
 > - 每次执行都必须创建新的时间戳批次目录，保存完整的调优过程数据
 > - 这是强制性要求，无例外情况
 
-本指南**禁止**直接在宿主机上或通过远程机器连接执行任何调优命令。本指南的职责是依据瓶颈分析结果，生成中间态调优建议，供调优域入口汇总为一份完整的调优建议报告。
+本技能**禁止**直接在宿主机上或通过远程机器连接执行任何调优命令。本技能的职责是依据瓶颈分析结果，生成中间态调优建议，供调优域入口汇总为一份完整的调优建议报告。
 
 ### 数据目录约束
 
 - **读取路径**：从 `${WORK_DIR}/analysis/` 下查找包含 multi-net-path 相关分析结论的 `result.md` 文件
 - **查找命令示例**：
 ```bash
+# 远端模式: ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name \"result.md\" ..." 在远端执行；本地模式直接执行
 CONCLUSION_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "oenetcls\|venetcls\|multi.net.path\|ntuple\|跨NUMA.*中断" {} \; | head -1)
 ```
 - **数据缺失处理**：如果 `${WORK_DIR}/analysis/` 目录不存在或未找到网卡多路径相关的分析结果数据，必须明确提醒用户：**需要先完成瓶颈分析后才能生成调优建议**，不可在无分析数据的情况下直接调优
 
 ---
 
+### 执行模式与 `${WORK_DIR}` 语义（核心）
+
+- 输入契约携带 `execution_context`（`execution_mode` / `user` / `ip`）。**远端模式**（execution_mode=remote）：`${WORK_DIR}` 是**远端服务器上**的路径：
+  - 读取融合报告/分析结果：经 ssh 在远端读取（`ssh -q ${user}@${ip} "grep/cat <远端文件>"`），**禁止** scp 拷回本地；下方 `find ${WORK_DIR}/analysis/ ...` 等命令在远端模式下必须写为 `ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name result.md ..."` 形式
+  - 写入中间态建议/契约到 `${WORK_DIR}/tuning/...`：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端路径；**禁止**在 agent 本地创建 `${WORK_DIR}` 目录
+  - **本技能不创建脚本目录**：本技能仅产出中间态建议（`${WORK_DIR}/tuning/intermediate/multi-net-path-tuning.md`）与输出契约；调优脚本目录 `${WORK_DIR}/tuning/multi-net-path-tuning/` 由协调器 `opentunex-scenario-tuning` 在步骤 4 统一创建（从本技能 `scripts/` 复制基础脚本 + 生成 `tuning.sh`）。本技能**不再**负责脚本部署与入口脚本生成
+  - 本技能**不执行**调优命令（遵守 T-01/T-02）：`bash scripts/multi_net_path_tune.sh ...` 与 `echo X > /sys/...` 等命令出现在生成的脚本/报告中，由**用户确认后在远端服务器上执行**；agent 不通过 ssh 代执行
+- **本地模式**（execution_mode=local）：`${WORK_DIR}` 为 agent 本地目录，脚本部署与文件操作为本地操作。
+- 具体写法见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`。
+
 ## 输入约定
 
-本指南的数据来源是**瓶颈分析结果**。
+本技能的数据来源是**瓶颈分析结果**。
 
 | 输入数据 | 必需 | 说明 |
 |---------|------|------|
@@ -69,13 +85,13 @@ CONCLUSION_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "oe
 | 多数发行版 | `oenetcls` | `/proc/net/oenetcls/stats` |
 | 部分定制内核 | `venetcls` | `/proc/net/venetcls/stats` |
 
-**检测方式**：脚本 `scripts/multi-net-path-tuning/multi_net_path_tune.sh` 内置 `resolve_module_name()`，按以下优先级自动识别（结果缓存到全局 `MODULE_NAME`）：
+**检测方式**：脚本 `scripts/multi_net_path_tune.sh` 内置 `resolve_module_name()`，按以下优先级自动识别（结果缓存到全局 `MODULE_NAME`）：
 
 1. 优先匹配已加载的模块（`/sys/module/<name>` 或 `lsmod`）
 2. 未加载时按顺序匹配 `modinfo` 可用的模块
 3. 都失败则默认 `oenetcls`（脚本将依据 `unavailable` 状态终止调优）
 
-**报告生成要求**：本指南在生成报告时**必须**从瓶颈分析结果中提取实际模块名（搜索 `oenetcls|venetcls`），填入调优步骤中的 `modprobe` / `lsmod` / `rmmod` / `/proc/net/...` 命令，**禁止**使用 `oenetcls` 作为硬编码默认值。当瓶颈分析未明确给出模块名时，应在报告中注明"实际模块名由 `tuning.sh check` 自动识别"。
+**报告生成要求**：本技能在生成报告时**必须**从瓶颈分析结果中提取实际模块名（搜索 `oenetcls|venetcls`），填入调优步骤中的 `modprobe` / `lsmod` / `rmmod` / `/proc/net/...` 命令，**禁止**使用 `oenetcls` 作为硬编码默认值。当瓶颈分析未明确给出模块名时，应在报告中注明"实际模块名由 `tuning.sh check` 自动识别"。
 
 ### irqbalance 服务
 
@@ -102,15 +118,15 @@ CONCLUSION_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "oe
 
 ### 基础脚本调用
 
-本指南依赖 `scripts/multi-net-path-tuning/multi_net_path_tune.sh` 脚本完成调优操作。脚本支持以下操作：
+本技能依赖 `scripts/multi_net_path_tune.sh` 脚本完成调优操作。脚本支持以下操作：
 
 | 操作 | 命令 | 说明 |
 |------|------|------|
-| 环境检查 | `bash scripts/multi-net-path-tuning/multi_net_path_tune.sh check` | 检查 oenetcls/venetcls 模块可用性（自动识别）、网卡 ntuple 支持、irqbalance 状态、NUMA 拓扑 |
-| 状态备份 | `bash scripts/multi-net-path-tuning/multi_net_path_tune.sh backup` | 备份当前模块（oenetcls/venetcls）和 irqbalance 状态 |
-| 应用调优 | `bash scripts/multi-net-path-tuning/multi_net_path_tune.sh apply "<ifnames>" "<appname>" [mode strategy debug match_ip_flag irqname rxq_multiplex_limit lo_rps_policy rps_policy]` | 停止 irqbalance + 加载自动识别的多路径模块。后 8 个参数可选，未传则由模块使用默认值 |
-| 查看状态 | `bash scripts/multi-net-path-tuning/multi_net_path_tune.sh status` | 查看多路径模块（oenetcls/venetcls）状态、中断分布、NUMA 拓扑 |
-| 回滚 | `bash scripts/multi-net-path-tuning/multi_net_path_tune.sh rollback` | 卸载多路径模块（oenetcls/venetcls）+ 恢复 irqbalance |
+| 环境检查 | `bash scripts/multi_net_path_tune.sh check` | 检查 oenetcls/venetcls 模块可用性（自动识别）、网卡 ntuple 支持、irqbalance 状态、NUMA 拓扑 |
+| 状态备份 | `bash scripts/multi_net_path_tune.sh backup` | 备份当前模块（oenetcls/venetcls）和 irqbalance 状态 |
+| 应用调优 | `bash scripts/multi_net_path_tune.sh apply "<ifnames>" "<appname>" [mode strategy debug match_ip_flag irqname rxq_multiplex_limit lo_rps_policy rps_policy]` | 停止 irqbalance + 加载自动识别的多路径模块。后 8 个参数可选，未传则由模块使用默认值 |
+| 查看状态 | `bash scripts/multi_net_path_tune.sh status` | 查看多路径模块（oenetcls/venetcls）状态、中断分布、NUMA 拓扑 |
+| 回滚 | `bash scripts/multi_net_path_tune.sh rollback` | 卸载多路径模块（oenetcls/venetcls）+ 恢复 irqbalance |
 
 **调优 apply 命令参数顺序**（与 `modprobe` 一致）：
 
@@ -131,19 +147,19 @@ CONCLUSION_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "oe
 
 ---
 
-## tuning.sh 动态生成说明
+## tuning.sh 动态生成说明（参考：协调器执行）
 
-### 生成目的
+> **⚠️ 职责说明**：本节为协调器 `opentunex-scenario-tuning` 生成入口脚本时使用的参考模板。**本子技能不执行此步骤**——脚本目录与 `tuning.sh` 由协调器统一创建（见协调器 SKILL.md 步骤 4）。本节保留是为了让子技能输出契约中的 `output.summary` 字段能准确说明脚本模板与基础脚本名，方便协调器引用。
 
-根据最新的调优报告规范，每个调优方向的脚本需要组织为独立文件夹，包含：
-- **入口脚本 `tuning.sh`**：动态生成，包含针对当前瓶颈的动态参数
-- **基础脚本**：从 `scripts/` 目录复制的原始脚本
+### 入口脚本目录结构
 
-### 生成流程
+协调器会按以下结构创建脚本目录：
 
-1. **创建调优技能文件夹**：在报告输出目录下创建 `multi-net-path-tuning/` 文件夹
-2. **复制基础脚本**：将 `scripts/multi-net-path-tuning/multi_net_path_tune.sh` 复制到该文件夹
-3. **生成入口脚本 `tuning.sh`**：根据当前瓶颈分析结果，动态生成入口脚本
+```
+${WORK_DIR}/tuning/multi-net-path-tuning/
+├── tuning.sh              # 入口脚本（动态生成）
+└── multi_net_path_tune.sh # 基础脚本（从本技能 scripts/ 复制）
+```
 
 ### tuning.sh 模板
 
@@ -266,7 +282,7 @@ esac
 
 ### Phase 2: 生成中间态调优建议
 
-依据 [中间态建议模板](../intermediate-report-template.md) 生成报告，按以下要求填充各字段：
+依据 [中间态建议模板](../../references/intermediate-report-template.md) 生成报告，按以下要求填充各字段：
 
 #### 2.1 瓶颈点列表填充
 
@@ -369,7 +385,7 @@ sar -n DEV 1 10
 
 ### Phase 3: 报告输出
 
-将生成的中间态调优建议保存至：
+将生成的中间态调优建议保存至：（远端模式：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端该路径；禁止在 agent 本地创建 `${WORK_DIR}` 目录）
 ```
 ${WORK_DIR}/tuning/intermediate/multi-net-path-tuning.md
 ```
@@ -381,11 +397,14 @@ ${WORK_DIR}/tuning/multi-net-path-tuning/
 └── multi_net_path_tune.sh # 复制的基础脚本
 ```
 
+> **⚠️ 职责说明**：上述目录由协调器 `opentunex-scenario-tuning` 在步骤 4 创建，本子技能仅产出中间态建议，不负责脚本部署。
+```
+
 ---
 
 ## 契约输出
 
-输出契约格式参见 [contract-spec.md](../contract-spec.md)，本指南特有字段：
+输出契约格式参见 [contract-spec.md](../references/contract-spec.md)，本技能特有字段：
 
 ```yaml
 skill_name: "opentunex-multi-net-path-tuning"
@@ -396,4 +415,3 @@ input:
 output:
   intermediate_path: "[actual intermediate_path]"
 constraints_acknowledged: [ST-01~ST-04]
-```

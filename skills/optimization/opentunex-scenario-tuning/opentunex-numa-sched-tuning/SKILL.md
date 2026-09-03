@@ -1,26 +1,42 @@
-# NUMA 调度并行调优指南
+---
+name: "opentunex-numa-sched-tuning"
+description: "numa并行感知调度调优建议。基于瓶颈分析结果，生成启用PARAL特性并设置sched_util_low_pct参数的调优建议报告，减少跨NUMA访问延迟（仅aarch64）。**必须使用此技能**：当瓶颈分析显示NUMA内存不均衡、跨NUMA访问率高、NUMA节点间负载差异大、需要启用PARAL特性时。触发关键词：NUMA、PARAL、sched_util_low_pct、跨NUMA访问、内存不均衡、aarch64架构调度优化、numa并行感知调度。"
+---
+
+# NUMA 调度并行调优建议
 
 启用numa并行感知调度特性（PARAL），让线程在同NUMA节点内调度，减少跨NUMA访问延迟。
 
 ## 强制约束
 
-> 本指南遵守 [场景调优子技能共享约束](../common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
+> 本技能遵守 [场景调优子技能共享约束](../references/common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
 
-本指南依据 [中间态建议模板](../intermediate-report-template.md) 生成结构化的中间态调优建议。
+本技能依据 `references/intermediate-report-template.md` 模板生成结构化的中间态调优建议。
 
 ### 数据目录约束
 
 - **读取路径**：从 `${WORK_DIR}/analysis/` 下查找包含NUMA相关分析结论的 `result.md` 文件
 - **查找命令示例**：
 ```bash
+# 远端模式: ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name \"result.md\" ..." 在远端执行；本地模式直接执行
 CONCLUSION_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "NUMA\|numa\|PARAL" {} \; | head -1)
 ```
 
 ---
 
+### 执行模式与 `${WORK_DIR}` 语义（核心）
+
+- 输入契约携带 `execution_context`（`execution_mode` / `user` / `ip`）。**远端模式**（execution_mode=remote）：`${WORK_DIR}` 是**远端服务器上**的路径：
+  - 读取融合报告/分析结果：经 ssh 在远端读取（`ssh -q ${user}@${ip} "grep/cat <远端文件>"`），**禁止** scp 拷回本地；下方 `find ${WORK_DIR}/analysis/ ...` 等命令在远端模式下必须写为 `ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name result.md ..."` 形式
+  - 写入中间态建议/契约到 `${WORK_DIR}/tuning/intermediate/` 与 `${WORK_DIR}/tuning/contracts/`：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端路径；**禁止**在 agent 本地创建 `${WORK_DIR}` 目录
+  - **本技能不创建脚本目录**：本技能仅产出中间态建议（`${WORK_DIR}/tuning/intermediate/numa-sched-tuning.md`）与输出契约；调优脚本目录 `${WORK_DIR}/tuning/numa-sched-tuning/` 由协调器 `opentunex-scenario-tuning` 在步骤 4 统一创建（从本技能 `scripts/` 复制基础脚本 + 生成 `tuning.sh`）。本技能**不再**负责脚本部署与入口脚本生成
+  - 本技能**不执行**调优命令（遵守 T-01/T-02）：`bash scripts/numa_sched_tune.sh ...` 与 `echo X > /sys/...` 等命令出现在生成的脚本/报告中，由**用户确认后在远端服务器上执行**；agent 不通过 ssh 代执行
+- **本地模式**（execution_mode=local）：`${WORK_DIR}` 为 agent 本地目录，脚本部署与文件操作为本地操作。
+- 具体写法见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`。
+
 ## 输入约定
 
-本指南的数据来源是**瓶颈分析结果**。
+本技能的数据来源是**瓶颈分析结果**。
 
 | 输入数据 | 必需 | 说明 |
 |---------|------|------|
@@ -63,33 +79,33 @@ CONCLUSION_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "NU
 
 ### 基础脚本调用
 
-本指南依赖 `scripts/numa-sched-tuning/numa_sched_tune.sh` 脚本完成调优操作。脚本支持以下操作：
+本技能依赖 `scripts/numa_sched_tune.sh` 脚本完成调优操作。脚本支持以下操作：
 
 | 操作 | 命令 | 说明 |
 |------|------|------|
-| 环境检查 | `bash scripts/numa-sched-tuning/numa_sched_tune.sh check` | 检查sched_features和sched_util_low_pct文件是否存在且可写 |
-| 状态备份 | `bash scripts/numa-sched-tuning/numa_sched_tune.sh backup` | 备份当前PARAL状态和sched_util_low_pct值 |
-| 应用调优 | `bash scripts/numa-sched-tuning/numa_sched_tune.sh apply` | 启用PARAL + 设置sched_util_low_pct=100 |
-| 查看状态 | `bash scripts/numa-sched-tuning/numa_sched_tune.sh status` | 查看当前PARAL状态和sched_util_low_pct值 |
-| 回滚 | `bash scripts/numa-sched-tuning/numa_sched_tune.sh rollback` | 恢复最近一次备份的状态 |
+| 环境检查 | `bash scripts/numa_sched_tune.sh check` | 检查sched_features和sched_util_low_pct文件是否存在且可写 |
+| 状态备份 | `bash scripts/numa_sched_tune.sh backup` | 备份当前PARAL状态和sched_util_low_pct值 |
+| 应用调优 | `bash scripts/numa_sched_tune.sh apply` | 启用PARAL + 设置sched_util_low_pct=100 |
+| 查看状态 | `bash scripts/numa_sched_tune.sh status` | 查看当前PARAL状态和sched_util_low_pct值 |
+| 回滚 | `bash scripts/numa_sched_tune.sh rollback` | 恢复最近一次备份的状态 |
 
 > **⚠️ 说明**：调优报告中的"调优步骤"展示独立命令，目的是让用户了解具体做了什么操作、修改了哪些文件。实际调优时用户可使用入口脚本 `tuning.sh`（由用户确认后自行执行），脚本会自动完成环境检查、状态备份、调优执行、验证和回滚，并自适应 sched_features 路径。Agent 不得自动执行调优操作。
 
 ---
 
-## tuning.sh 动态生成说明
+## tuning.sh 动态生成说明（参考：协调器执行）
 
-### 生成目的
+> **⚠️ 职责说明**：本节为协调器 `opentunex-scenario-tuning` 生成入口脚本时使用的参考模板。**本子技能不执行此步骤**——脚本目录与 `tuning.sh` 由协调器统一创建（见协调器 SKILL.md 步骤 4）。本节保留是为了让子技能输出契约中的 `output.summary` 字段能准确说明脚本模板与基础脚本名，方便协调器引用。
 
-根据最新的调优报告规范，每个调优方向的脚本需要组织为独立文件夹，包含：
-- **入口脚本 `tuning.sh`**：动态生成，包含针对当前瓶颈的动态参数
-- **基础脚本**：从 `scripts/` 目录复制的原始脚本
+### 入口脚本目录结构
 
-### 生成流程
+协调器会按以下结构创建脚本目录：
 
-1. **创建调优技能文件夹**：在报告输出目录下创建 `numa-sched-tuning/` 文件夹
-2. **复制基础脚本**：将 `scripts/numa-sched-tuning/numa_sched_tune.sh` 复制到该文件夹
-3. **生成入口脚本 `tuning.sh`**：根据当前瓶颈分析结果，动态生成入口脚本
+```
+${WORK_DIR}/tuning/numa-sched-tuning/
+├── tuning.sh              # 入口脚本（动态生成）
+└── numa_sched_tune.sh     # 基础脚本（从本技能 scripts/ 复制）
+```
 
 ### tuning.sh 模板
 
@@ -170,7 +186,7 @@ esac
 
 ### Phase 2: 生成中间态调优建议
 
-依据 [中间态建议模板](../intermediate-report-template.md) 生成报告，按以下要求填充各字段：
+依据 [中间态建议模板](../../references/intermediate-report-template.md) 生成报告，按以下要求填充各字段：
 
 #### 2.1 瓶颈点列表填充
 
@@ -218,19 +234,12 @@ echo [原始值] > /proc/sys/kernel/sched_util_low_pct
 
 ### Phase 3: 报告输出
 
-将生成的中间态调优建议保存至：
+将生成的中间态调优建议保存至：（远端模式：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端该路径；禁止在 agent 本地创建 `${WORK_DIR}` 目录）
 ```
 ${WORK_DIR}/tuning/intermediate/numa-sched-tuning.md
 ```
 
-同时，在报告目录下创建调优脚本文件夹：
-```
-${WORK_DIR}/tuning/numa-sched-tuning/
-├── tuning.sh              # 动态生成的入口脚本
-└── numa_sched_tune.sh   # 复制的基础脚本
-```
-
-**说明**：协调器将中间态建议写入 `${WORK_DIR}/tuning/intermediate/`，因此可通过 `${WORK_DIR}/tuning/intermediate/numa-sched-tuning.md` 读取结果。
+**说明**：本技能**仅产出中间态建议**——`${WORK_DIR}/tuning/numa-sched-tuning/` 目录由协调器 `opentunex-scenario-tuning` 在步骤 4 创建（基础脚本从本技能 `scripts/` 复制 + `tuning.sh` 由协调器动态生成）。本技能不创建脚本目录。
 
 **注意**：本文件是中间态数据，最终将由调优域入口汇总为一份完整的调优建议报告。
 
@@ -240,17 +249,17 @@ ${WORK_DIR}/tuning/numa-sched-tuning/
 
 | 产出项 | 说明 |
 |--------|------|
-| 调优建议报告 | 依据中间态模板生成的结构化报告 |
-| 调优脚本文件夹 | 包含 tuning.sh 入口脚本和 numa_sched_tune.sh 基础脚本 |
+| 中间态调优建议 | 依据中间态模板生成的结构化报告，写入 `${WORK_DIR}/tuning/intermediate/numa-sched-tuning.md` |
+| 调优脚本目录 | 由协调器在步骤 4 创建（`${WORK_DIR}/tuning/numa-sched-tuning/`） |
 | 预期收益 | 跨NUMA访问比例降低30%-50%，内存访问延迟降低15%-30% |
 | 风险提示 | 仅适用于aarch64架构；sched_util_low_pct修改可能影响调度器行为 |
-| 回滚方案 | 执行 `./numa-sched-tuning/tuning.sh rollback` 恢复原状态 |
+| 回滚方案 | 由协调器生成的 `./numa-sched-tuning/tuning.sh rollback` 恢复原状态 |
 
 ---
 
 ## 冲突约束
 
-> **⚠️ 以下冲突约束由调优域入口统一处理，本指南无需处理。**
+> **⚠️ 以下冲突约束由调优域入口统一处理，本技能无需处理。**
 
 | 调优方向A | 调优方向B | 冲突资源 | 执行策略 |
 |----------|----------|---------|---------|
@@ -262,7 +271,7 @@ ${WORK_DIR}/tuning/numa-sched-tuning/
 
 ## 契约输出
 
-输出契约格式参见 [contract-spec.md](../contract-spec.md)，本指南特有字段：
+输出契约格式参见 [contract-spec.md](../references/contract-spec.md)，本技能特有字段：
 
 ```yaml
 skill_name: "opentunex-numa-sched-tuning"
@@ -273,4 +282,3 @@ input:
 output:
   intermediate_path: "[actual intermediate_path]"
 constraints_acknowledged: [ST-01~ST-04]
-```

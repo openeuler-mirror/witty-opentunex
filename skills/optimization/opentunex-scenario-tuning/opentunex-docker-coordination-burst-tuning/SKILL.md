@@ -1,4 +1,9 @@
-# Docker 算力统筹调优指南
+﻿---
+name: "opentunex-docker-coordination-burst-tuning"
+description: "Docker算力统筹调优建议。基于瓶颈分析结果，生成启用sched_soft_runtime_ratio并设置容器cpu.soft_quota=1的调优建议报告，让高负载容器在宿主机空闲时借用额外CPU时间片提升突发性能。触发:Docker CPU限流、容器CPU瓶颈、容器突发负载、cfs_burst、sched_soft_runtime_ratio。"
+---
+
+# Docker 算力统筹调优建议
 
 当系统有空闲 CPU 资源时，让高负载 Docker 容器"借用"额外时间片，提升突发性能。通过设置全局内核参数 `sched_soft_runtime_ratio` 并启用容器的 cgroup `cpu.soft_quota`，允许容器临时突破硬限制。
 
@@ -6,15 +11,15 @@
 
 ## 强制约束
 
-> 本指南遵守 [场景调优子技能共享约束](../common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
+> 本技能遵守 [场景调优子技能共享约束](../references/common-constraints.md) 中定义的所有执行约束、调优执行约束和数据目录约定。
 
-本指南依据 [中间态建议模板](../intermediate-report-template.md) 生成结构化的中间态调优建议。
+本技能依据 `references/intermediate-report-template.md` 模板生成结构化的中间态调优建议。
 
 ---
 
 ## 输入约定
 
-本指南的数据来源是**瓶颈分析结果**。
+本技能的数据来源是**瓶颈分析结果**。
 
 | 输入数据 | 必需 | 说明 |
 |---------|------|------|
@@ -26,6 +31,16 @@
 如果用户未提供评估结论，应先引导用户完成 Docker 算力统筹适用性评估。
 
 ---
+
+### 执行模式与 `${WORK_DIR}` 语义（核心）
+
+- 输入契约携带 `execution_context`（`execution_mode` / `user` / `ip`）。**远端模式**（execution_mode=remote）：`${WORK_DIR}` 是**远端服务器上**的路径：
+  - 读取融合报告/分析结果：经 ssh 在远端读取（`ssh -q ${user}@${ip} "grep/cat <远端文件>"`），**禁止** scp 拷回本地；下方 `find ${WORK_DIR}/analysis/ ...` 等命令在远端模式下必须写为 `ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name result.md ..."` 形式
+  - 写入中间态建议/契约到 `${WORK_DIR}/tuning/...`：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端路径；**禁止**在 agent 本地创建 `${WORK_DIR}` 目录
+  - **本技能不创建脚本目录**：本技能仅产出中间态建议（`${WORK_DIR}/tuning/intermediate/docker-coordination-burst-tuning.md`）与输出契约；调优脚本目录 `${WORK_DIR}/tuning/docker-coordination-burst-tuning/` 由协调器 `opentunex-scenario-tuning` 在步骤 4 统一创建（从本技能 `scripts/` 复制基础脚本 + 生成 `tuning.sh`）。本技能**不再**负责脚本部署与入口脚本生成
+  - 本技能**不执行**调优命令（遵守 T-01/T-02）：`bash scripts/docker_coordination_burst.sh ...` 与 `echo X > /sys/...` 等命令出现在生成的脚本/报告中，由**用户确认后在远端服务器上执行**；agent 不通过 ssh 代执行
+- **本地模式**（execution_mode=local）：`${WORK_DIR}` 为 agent 本地目录，脚本部署与文件操作为本地操作。
+- 具体写法见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`。
 
 ## 调优参数说明
 
@@ -56,43 +71,55 @@
 ### 基础脚本调用
 
 ```bash
-cd skills/optimization/opentunex-scenario-tuning
+# 本地路径：定位基础脚本源文件用（skill 目录在 agent 主机上）；远端模式拷贝目标为远端 ${WORK_DIR}/tuning/docker-coordination-burst-tuning/
+cd skills/optimization/opentunex-scenario-tuning/opentunex-docker-coordination-burst-tuning
 
 # 环境检查与备份
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh check
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh backup
+bash scripts/docker_coordination_burst.sh check
+bash scripts/docker_coordination_burst.sh backup
 
 # 对所有容器应用调优
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh apply
+bash scripts/docker_coordination_burst.sh apply
 
 # 对指定容器应用调优
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh apply 20 <container_id> [container_id ...]
+bash scripts/docker_coordination_burst.sh apply 20 <container_id> [container_id ...]
 
 # 查看状态
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh status
+bash scripts/docker_coordination_burst.sh status
 
 # 回滚
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh rollback
+bash scripts/docker_coordination_burst.sh rollback
 ```
 
 ---
 
-## tuning.sh 动态生成说明
+## tuning.sh 动态生成说明（参考：协调器执行）
 
-### 生成目的
+> **⚠️ 职责说明**：本节为协调器 `opentunex-scenario-tuning` 生成入口脚本时使用的参考模板。**本子技能不执行此步骤**——脚本目录与 `tuning.sh` 由协调器统一创建（见协调器 SKILL.md 步骤 4）。本节保留是为了让子技能输出契约中的 `output.summary` 字段能准确说明脚本模板与基础脚本名，方便协调器引用。
 
-生成一份独立的、可执行的 `tuning.sh` 调优脚本，供用户在容器环境中执行。
+### 入口脚本目录结构
 
-### 生成流程
+协调器会按以下结构创建脚本目录：
 
-1. 读取瓶颈分析结果中的推荐参数（ratio、容器 ID 列表）
-2. 校验参数有效性（内核支持、宿主机负载、容器存在性）
-3. 生成包含完整调优、验证、回滚逻辑的 bash 脚本
+```
+${WORK_DIR}/tuning/docker-coordination-burst-tuning/
+├── tuning.sh              # 入口脚本（动态生成）
+└── docker_coordination_burst.sh  # 基础脚本（从本技能 scripts/ 复制）
+```
+
+### 动态参数（用于协调器生成 tuning.sh）
+
+协调器生成 `tuning.sh` 时需要以下参数（由本技能输出契约 `output.summary` 字段提供）：
+
+| 参数 | 含义 | 来源 |
+|------|------|------|
+| ratio | sched_soft_runtime_ratio 推荐值 | 瓶颈分析结果 |
+| container_ids | 容器 ID 列表 | 瓶颈分析结果 |
 
 ### 报告中的脚本路径
 
 - `${WORK_DIR}/tuning/intermediate/docker-coordination-burst-tuning.md` — 中间态调优建议
-- `scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh` — 执行脚本
+- `scripts/docker_coordination_burst.sh` — 执行脚本（技能内）
 
 ---
 
@@ -134,7 +161,7 @@ bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh rollb
 
 **目标**：依据瓶颈分析结果，生成完整的 Docker 算力统筹调优建议报告。
 
-**报告模板**：依据 [中间态建议模板](../intermediate-report-template.md) 生成报告。
+**报告模板**：依据 [中间态建议模板](../../references/intermediate-report-template.md) 生成报告。
 
 ### 2.1 报告内容
 
@@ -159,8 +186,8 @@ bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh rollb
 ##### 步骤 0: 环境检查与状态备份
 
 ```bash
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh check
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh backup
+bash scripts/docker_coordination_burst.sh check
+bash scripts/docker_coordination_burst.sh backup
 ```
 
 ##### 步骤 1: 设置全局 sched_soft_runtime_ratio 并启用容器 soft_quota
@@ -177,17 +204,17 @@ bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh backu
 
 对所有容器：
 ```bash
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh apply
+bash scripts/docker_coordination_burst.sh apply
 ```
 
 对指定容器（替换 `<container_id>` 为实际 ID）：
 ```bash
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh apply 20 <container_id> [container_id ...]
+bash scripts/docker_coordination_burst.sh apply 20 <container_id> [container_id ...]
 ```
 
 **验证方法**：
 ```bash
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh status
+bash scripts/docker_coordination_burst.sh status
 ```
 
 **期望验证结果**：
@@ -199,7 +226,7 @@ bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh statu
 
 **回滚方法**：
 ```bash
-bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh rollback
+bash scripts/docker_coordination_burst.sh rollback
 ```
 
 **执行顺序说明**：先设置全局 `sched_soft_runtime_ratio`，再为容器启用 `cpu.soft_quota`。如果容器 `cpu.soft_quota` 设置失败，不影响全局参数（全局参数单独回滚）。
@@ -215,14 +242,14 @@ bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh rollb
 
 | 调优步骤 | 风险等级 | 回滚方法 |
 |---------|---------|---------|
-| 设置 sched_soft_runtime_ratio | 低 | `bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh rollback` |
-| 启用容器 soft_quota | 低 | `bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh rollback` |
+| 设置 sched_soft_runtime_ratio | 低 | `bash scripts/docker_coordination_burst.sh rollback` |
+| 启用容器 soft_quota | 低 | `bash scripts/docker_coordination_burst.sh rollback` |
 
 **回滚顺序**：脚本自动按序恢复（先容器 soft_quota，后全局 ratio）。
 
 ### Phase 3: 报告输出
 
-- 输出路径：`<intermediate_path>/docker-coordination-burst-tuning.md`
+- 输出路径：`<intermediate_path>/docker-coordination-burst-tuning.md`（远端模式：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端该路径；禁止在 agent 本地创建 `${WORK_DIR}` 目录）
 - 报告包含调优生效验证命令和期望结果
 
 ---
@@ -249,7 +276,7 @@ bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh rollb
 
 ## 产出
 
-本指南产出以下信息，写入 `${WORK_DIR}/tuning/intermediate/docker-coordination-burst-tuning.md`：
+本技能产出以下信息，写入 `${WORK_DIR}/tuning/intermediate/docker-coordination-burst-tuning.md`：（远端模式：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端该路径；禁止在 agent 本地创建 `${WORK_DIR}` 目录）
 
 | 产出项 | 说明 |
 |--------|------|
@@ -263,7 +290,7 @@ bash scripts/docker-coordination-burst-tuning/docker_coordination_burst.sh rollb
 
 ## 契约输出
 
-输出契约格式参见 [contract-spec.md](../contract-spec.md)，本指南特有字段：
+输出契约格式参见 [contract-spec.md](../references/contract-spec.md)，本技能特有字段：
 
 ```yaml
 skill_name: "opentunex-docker-coordination-burst-tuning"
@@ -274,4 +301,3 @@ input:
 output:
   intermediate_path: "[actual intermediate_path]"
 constraints_acknowledged: [ST-01~ST-04]
-```
