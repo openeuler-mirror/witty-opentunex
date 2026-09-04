@@ -13,7 +13,17 @@ INCLUDE_SKILLS = opentunex-remote-execution \
                  opentunex-mem-bottleneck \
                  opentunex-net-bottleneck \
                  opentunex-sched-bottleneck \
-                 opentunex-top-down-bottleneck
+                 opentunex-top-down-bottleneck \
+                 opentunex-application-bottleneck \
+                 opentunex-bottleneck-analysis \
+                 opentunex-scenario-bottleneck \
+                 opentunex-data-collection \
+                 opentunex-application-optimization \
+                 opentunex-inference-core-binding-optimization \
+                 opentunex-os-performance-optimization \
+                 opentunex-performance-tuning \
+                 opentunex-scenario-tuning \
+                 witty-opentunex
 
 .PHONY: all install clean test
 
@@ -23,23 +33,33 @@ install: install-skills
 
 install-skills:
 	install -d $(SKILLS_DIR)
-	for skill in skills/*/opentunex-*; do \
+	install_one_skill() { \
+		local _src="$$1"; \
+		local _dest="$$2"; \
+		install -d "$$_dest"; \
+		for _sub in references scripts; do \
+			[ -d "$$_src/$$_sub" ] || continue; \
+			install -d "$$_dest/$$_sub"; \
+			for _f in "$$_src/$$_sub"/*; do \
+				[ -f "$$_f" ] && install -m 644 "$$_f" "$$_dest/$$_sub/"; \
+			done; \
+		done; \
+		[ -f "$$_src/SKILL.md" ] && install -m 644 "$$_src/SKILL.md" "$$_dest/"; \
+		for _sub in "$$_src"/opentunex-*; do \
+			[ -d "$$_sub" ] || continue; \
+			install_one_skill "$$_sub" "$$_dest/$$(basename "$$_sub")"; \
+		done; \
+	}; \
+	for skill in skills/*/opentunex-* skills/witty-opentunex; do \
 		[ -d "$$skill" ] || continue; \
 		basename=$$(basename $$skill); \
 		case " $(INCLUDE_SKILLS) " in *" $$basename "*) ;; *) continue;; esac; \
-		install -d $(SKILLS_DIR)/$$basename; \
-		for subdir in references scripts; do \
-			[ -d "$$skill/$$subdir" ] && install -d $(SKILLS_DIR)/$$basename/$$subdir; \
-			[ -d "$$skill/$$subdir" ] && for f in $$skill/$$subdir/*; do \
-				[ -f "$$f" ] && install -m 644 $$f $(SKILLS_DIR)/$$basename/$$subdir/; \
-			done; \
-		done; \
-		install -m 644 $$skill/SKILL.md $(SKILLS_DIR)/$$basename/; \
+		install_one_skill "$$skill" "$(SKILLS_DIR)/$$basename"; \
 	done
 	@echo "Installed skills to $(SKILLS_DIR)"
 
 clean:
-	rm -rf $(SKILLS_DIR)/opentunex-*
+	rm -rf $(SKILLS_DIR)/opentunex-* $(SKILLS_DIR)/witty-opentunex
 	@echo "Cleaned skills from $(SKILLS_DIR)"
 
 test: test-skills
@@ -47,7 +67,7 @@ test: test-skills
 test-skills:
 	@echo "=== SKILL.md Format Validation ==="
 	@errors=0; \
-	for skill in skills/*/opentunex-*; do \
+	for skill in skills/*/opentunex-* skills/witty-opentunex; do \
 		[ -d "$$skill" ] || continue; \
 		basename=$$(basename $$skill); \
 		case " $(INCLUDE_SKILLS) " in *" $$basename "*) ;; *) continue;; esac; \
@@ -75,7 +95,7 @@ test-skills:
 			errors=$$((errors + 1)); \
 		fi; \
 		name_line=$$(grep "^name: " "$$skill_md" | head -1); \
-		name_val=$$(echo "$$name_line" | sed 's/^name: *//'); \
+		name_val=$$(echo "$$name_line" | sed 's/^name: *"\(.*\)"$$/\1/; t; s/^name: *//'); \
 		if [ "$$name_val" != "$$basename" ]; then \
 			echo "ERROR: $$basename/SKILL.md name mismatch (expected '$$basename', got '$$name_val')"; \
 			errors=$$((errors + 1)); \
