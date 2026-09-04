@@ -1,0 +1,37 @@
+USER: Can you explain what a hash table is and when to use one?
+ASSISTANT: A hash table is a data structure that maps keys to values using a hash function to compute an index into an array of buckets. The average time complexity for insert, delete, and
+    lookup operations is O(1), making it extremely efficient for scenarios requiring fast key-based access. Common use cases include implementing caches, counting frequencies of elements,
+    storing session data, and building database indexes. The trade-off is that hash tables use more memory than arrays or linked lists due to the overhead of the hash function and the need
+    to keep some buckets empty to maintain performance.
+USER: What collision resolution strategies should I be aware of?
+ASSISTANT: The two main strategies are chaining and open addressing. Chaining stores colliding elements in a linked list at each bucket, which is simple but has pointer overhead. Open
+    addressing probes for the next empty slot when a collision occurs, using techniques like linear probing, quadratic probing, or double hashing. Python's dict uses open addressing with a
+    variant of random probing for better cache locality. For most applications, chaining is easier to implement correctly, while open addressing can be faster when the load factor is kept
+    low.
+USER: What load factor should I aim for, and what happens when the table gets too full?
+ASSISTANT: A good target load factor is around 0.7 for general-purpose hash tables. This means the table should be about 70% full before resizing. When the load factor exceeds your
+    threshold, you should resize the table, typically doubling its capacity, and rehash all existing entries into the new larger table. This rehashing operation is O(n) but amortized over
+    many insertions it averages out to O(1) per insert. If you keep the load factor too high, collision rates spike and performance degrades dramatically. If too low, you waste memory. For
+    latency-sensitive real-time systems, consider incremental rehashing where you migrate entries gradually over many operations to avoid latency spikes.
+
+============================================================
+
+USER: Write a function to reverse a linked list iteratively in Python.
+ASSISTANT: Here's an iterative solution. The key insight is that we need three pointers: prev to track the already-reversed portion, curr for the node we're currently processing, and
+    next_temp to save the remaining list before we modify curr.next: def reverse_list(head): prev = None; curr = head; while curr: next_temp = curr.next; curr.next = prev; prev = curr; curr
+    = next_temp; return prev. This runs in O(n) time with O(1) space. The algorithm processes the list left to right, maintaining two partitions: the reversed prefix starting at prev, and
+    the unreversed suffix starting at curr. Each iteration moves one node from the unreversed partition to the reversed one.
+
+============================================================
+
+USER: Can you explain what a hash table is and when to use one?
+ASSISTANT: A hash table is a data structure that maps keys to values using a hash function to compute an index into an array of buckets. The average time complexity for insert, delete, and
+    lookup operations is O(1), making it extremely efficient for scenarios requiring fast key-based access. Common use cases include implementing caches, counting frequencies of elements,
+    storing session data, and building database indexes. The trade-off is that hash tables use more memory than arrays or linked lists due to the overhead of the hash function and the need
+    to keep some buckets empty to maintain performance.
+USER: What collision resolution strategies should I be aware of?
+ASSISTANT: The two main strategies are chaining and open addressing. Chaining stores colliding elements in a linked list at each bucket, which is simple but has pointer overhead. Open
+    addressing probes for the next empty slot when a collision occurs, using techniques like linear probing, quadratic probing, or double hashing. Python's dict uses open addressing with a
+    variant of random probing for better cache locality. For most applications, chaining is easier to implement correctly, while open addressing can be faster when the load factor is kept
+    low.
+USER: What load factor should I aim for, and what happens when the table gets too full?

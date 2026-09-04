@@ -13,7 +13,7 @@
 ```
 inference-core-binding-optimization
 ├── SKILL.md                          # 主Skill文件
-└── references/
+└── reference/
     ├── topo-info.md                  # 拓扑信息收集
     ├── bottleneck.md                  # 瓶颈分析
     └── affinity.md                    # 亲和性策略

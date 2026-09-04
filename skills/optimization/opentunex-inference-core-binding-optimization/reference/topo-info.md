@@ -1,20 +1,19 @@
 ---
 name: topo-info
-description: Collect system topology via Anansi (processes, sockets, IPC, devices, NUMA). Requires topo capability.
+description: Collect system topology via witty-profiler (processes, sockets, IPC, devices, NUMA). Requires witty-profiler.
 ---
 
 **Do NOT use when**:
-- Client has no `topo` capability
-- Only a simple process list is needed (use `opentunex_bash` instead)
+- witty-profiler not available
 - Real-time streaming data is required (topo returns a snapshot)
 
 ---
 
 ## Information Obtained
 
-**Source**: Anansi collectors (Socket, SharedMemory, NPU, GPU, NUMA, Container, etc.)
+**Source**: witty-profiler collectors (Socket, SharedMemory, NPU, GPU, NUMA, Container, etc.)
 
-**Output**: `topology_graph.txt` content (path on client: `local/anansi/run/topology_graph.txt` or `local/run/anansi/topology_graph.txt` depending on Anansi config)
+**Output**: `topology_graph.txt`
 
 **Format**:
 
@@ -44,14 +43,12 @@ Edges:
 
 ## Call Instructions
 
-1. Ensure session is bound to a client with `topo` (check via `opentunex_get_clients`).
-2. Call `opentunex_topo` with `pid` (optional): pass target process PID as seed, or omit/0 for full collection.
+1. Ensure witty-profiler is available on the client.
+2. Call `witty-profiler --offline --duration 30 [--pid <target_pid>]`: pass target process PID as seed via `--pid`, or omit for full collection.
 3. Tool returns the raw `topology_graph.txt` content.
-
-**Important**: Use `pid` only. Do NOT pass `duration` — that parameter is deprecated.
 
 ---
 
 ## References
 
-For full entity/edge tables and metrics: Anansi docs `architecture/graph-model.md`, `monitoring/overview.md`.
+For full entity/edge tables and metrics: see https://gitcode.com/openeuler/witty-profiler/blob/master/collector/python/docs/architecture/graph-model.md
