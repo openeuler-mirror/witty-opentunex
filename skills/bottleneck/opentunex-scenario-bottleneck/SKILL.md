@@ -143,7 +143,7 @@ sub_agent_enabled: false
 按 [references/fusion-rules.md](references/fusion-rules.md) 的流程执行：
 
 1. **提取叙述性字段**（优先于融合步骤 1）：扫描每个成功子技能 result.md 的分析结论区块，按 [references/result-template.md](references/result-template.md) 规则提取 **综合结论**、**预期收益**、**建议操作**，填充融合报告"场景分析汇总"表的基础数据
-2. **收集与标准化**：扫描每个成功子技能报告的 `## 结构化数据` 区块，提取 JSON 数据；补齐默认字段（`conflicts`→`[]`、`scenario_priority`→`0`、`source`→`"skill_output"`）；将 `applicability` 为 `not_applicable` 的建议直接归入 excluded（场景不适用）；将来源为 `llm_knowledge` 的临时建议归入 supplementary；构建全局冲突图和依赖图
+2. **收集与标准化**：扫描每个成功子技能报告的 `## 结构化数据` 区块，提取 JSON 数据；补齐默认字段（`conflicts`→`[]`、`scenario_priority`→`0`、`source`→`"skill_output"`）；**默认会话策略下**将 `applicability` 为 `not_applicable` 和 `limited_benefit` 的建议归入 excluded（分别标注"场景不适用" / "收益有限"），将 `estimated_gain.severity` 为 `low` 的建议也归入 excluded（标注"严重度过低"），均不进入后续核心融合流程；将来源为 `llm_knowledge` 的临时建议归入 supplementary；构建全局冲突图和依赖图。调用方可通过会话策略（`include_limited_benefit: true` / `min_gain_severity: "low"`）显式覆盖上述默认过滤
 3. **等价组划分**：按 `equivalence_class` 字段分组
 4. **组内择优排序**：按 `scenario_priority` → `severity` → `activation_requirement` → `source` 四级排序
 5. **构建初始选中集 S**：取每组排名第一的建议
