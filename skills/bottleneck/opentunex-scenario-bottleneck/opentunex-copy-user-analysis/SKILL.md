@@ -53,15 +53,15 @@ description: "copy_from_user 拷贝优化适用性分析。检查 ARM64 CPU part
 | 4 | 按"产出"章节模板，将决策结果写入 `${WORK_DIR}/analysis/opentunex-copy-user-analysis_collect/result.md` | 完整分析报告（含结构化数据 JSON） |
 | 5 | 按"契约输出"章节格式写入输出契约 YAML 文件 | 契约文件 |
 
-> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。**远端模式**下 `preanalysis.json` 生成在远端服务器输出目录 `${DATA_DIR}/opentunex-copy-user-analysis_collect/`，步骤 2 必须经 ssh `cat` 流回上下文读取，**禁止**在 agent 本地目录查找或读取该文件。步骤 1 为强制预解析模式：仅当步骤 1 执行失败或 `preanalysis.json` 不存在时才允许进入"数据读取"章节的降级路径，**禁止**跳过步骤 1 直接读取原始数据文件。**预解析模式下禁止直接读取 `scripts/preanalysis.sh` 脚本内容**（不得 Read/cat 脚本文件本身）：本地模式直接执行脚本；远端模式按 `opentunex-remote-execution` skill 执行方式 scp 上传脚本文件到远端后 ssh 执行，无需阅读脚本实现。
+> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。**远端模式**下 `preanalysis.json` 生成在远端服务器输出目录 `${DATA_DIR}/opentunex-copy-user-analysis_collect/`，步骤 2 必须经 ssh `cat` 流回上下文读取，**禁止**在 agent 本地目录查找或读取该文件。步骤 1 为强制执行预解析脚本，**禁止**跳过步骤 1 直接读取原始数据文件。**执行预解析脚本禁止直接读取 `scripts/preanalysis.sh` 脚本内容**（不得 Read/cat 脚本文件本身）：本地模式直接执行脚本；远端模式按 `opentunex-remote-execution` skill 执行方式 scp 上传脚本文件到远端后 ssh 执行，无需阅读脚本实现。
 
 ---
 
 ## 数据读取
 
-### 预解析模式（强制首选）：预分析 JSON
+### 预解析数据文件产出JSON
 
-> **强制**：必须先执行 `scripts/preanalysis.sh` 生成 `preanalysis.json` 并基于 JSON 分析，**禁止**跳过预解析直接读取原始数据文件。仅当预解析模式失败（脚本执行失败或 `preanalysis.json` 不存在，远端模式经 ssh 在远端确认）后，才允许进入下方降级路径。
+> **强制**：必须先执行 `scripts/preanalysis.sh` 生成 `preanalysis.json` 并基于 JSON 分析，**禁止**跳过预解析直接读取原始数据文件。
 
 1. 执行预处理脚本生成 JSON（远端模式：按 `opentunex-remote-execution` skill 执行方式 scp 上传后 `ssh -q -tt` 在远端执行，见"输入约定"执行模式章节）：
    ```bash
@@ -83,18 +83,6 @@ description: "copy_from_user 拷贝优化适用性分析。检查 ARM64 CPU part
 | `large_copy_detected` | LARGE_COPY_DETECTED | `true` / `false`（检测到 size > 4KB 的读写） |
 | `max_copy_size` | MAX_COPY_SIZE | 最大单次读写 size（字节） |
 | `large_copy_count` | LARGE_COPY_COUNT | size > 4KB 的调用次数 |
-
-### 降级路径：直接读取采集文件（仅当预解析模式失败后）
-
-仅当预解析模式失败（`preanalysis.json` 不可用）后，从以下文件直接提取（远端模式："不可用"的判断与以下文件的读取同样必须经 ssh 在远端执行，禁止在 agent 本地查找 `${DATA_DIR}` 下的文件）：
-
-> **⚠️ 大文件警告**：采集数据文件可能非常大，**禁止**直接 `cat`/Read 整个文件。必须按下表中每个指标的提取方法（grep 关键字 / sed 定位节）**定向搜索**目标内容，只读取命中的片段；远端模式经 ssh 在远端执行 grep，只把命中片段流回上下文，禁止把整个文件拉回 agent 本地。
-
-| 决策变量 | 数据来源文件 | 提取方法 |
-|---------|------------|---------|
-| IS_ARM64 / PART_ID_HEX | `static_info.txt` / `cpu_info.txt` / `cpu_detail_info.txt` | 提取 Architecture 字段；提取 "CPU part" 行的十六进制值 |
-| IS_COPY_USER_HOTSPOT / HOTSPOT_PERCENT | `hotspot_analysis.txt` / `hotspot_function_analysis.txt` | 搜索 `__arch_copy_to_user` / `__arch_copy_from_user` |
-| LARGE_COPY_DETECTED / MAX_COPY_SIZE | `syscall_analysis.txt` / `io_metrics_analysis.txt` / `perf_trace.txt` | 解析 `pread64`/`pwrite64` 调用的 count 字段 |
 
 ---
 

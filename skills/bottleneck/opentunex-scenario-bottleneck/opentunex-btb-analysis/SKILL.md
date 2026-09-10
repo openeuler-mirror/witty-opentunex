@@ -57,9 +57,9 @@ description: "BTB(分支目标缓冲) / TidCMP 适用性分析。检查 CPU 型�
 
 ## 数据读取
 
-### 预解析模式（强制首选）：预分析 JSON
+### 预解析数据文件产出JSON
 
-> **强制**：必须先执行 `scripts/preanalysis.sh` 生成 `preanalysis.json` 并基于 JSON 分析，**禁止**跳过预解析直接读取原始数据文件。仅当预解析失败（脚本执行失败或 `preanalysis.json` 不存在，远端模式经 ssh 在远端确认）时，按 SB-04 标注 `DATA_MISSING` 处理（本技能无逐文件降级路径）。
+> **强制**：必须先执行 `scripts/preanalysis.sh` 生成 `preanalysis.json` 并基于 JSON 分析，**禁止**跳过预解析直接读取原始数据文件。
 
 1. 执行预处理脚本生成 JSON（远端模式：按 `opentunex-remote-execution` skill 执行方式 scp 上传后 `ssh -q -tt` 在远端执行，见"输入约定"执行模式章节）：
    ```bash

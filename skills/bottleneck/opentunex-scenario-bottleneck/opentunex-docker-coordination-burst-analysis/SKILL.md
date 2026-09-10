@@ -47,15 +47,15 @@ description: "Docker算力统筹适用性分析。分析宿主机CPU负载与容
 | 4 | 按"产出"章节模板，将决策结果写入 `${WORK_DIR}/analysis/opentunex-docker-coordination-burst-analysis_collect/result.md` | 完整分析报告（含结构化数据 JSON） |
 | 5 | 按"契约输出"章节格式写入输出契约 YAML 文件 | 契约文件 |
 
-> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。**远端模式**下 `preanalysis.json` 生成在远端服务器输出目录 `${DATA_DIR}/opentunex-docker-coordination-burst-analysis_collect/`，步骤 2 必须经 ssh `cat` 流回上下文读取，**禁止**在 agent 本地目录查找或读取该文件。步骤 1 为强制预解析模式：仅当步骤 1 执行失败或 `preanalysis.json` 不存在时才允许进入"数据读取"章节的降级路径，**禁止**跳过步骤 1 直接读取原始数据文件。**预解析模式下禁止直接读取 `scripts/preanalysis.sh` 脚本内容**（不得 Read/cat 脚本文件本身）：本地模式直接执行脚本；远端模式按 `opentunex-remote-execution` skill 执行方式 scp 上传脚本文件到远端后 ssh 执行，无需阅读脚本实现。
+> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。**远端模式**下 `preanalysis.json` 生成在远端服务器输出目录 `${DATA_DIR}/opentunex-docker-coordination-burst-analysis_collect/`，步骤 2 必须经 ssh `cat` 流回上下文读取，**禁止**在 agent 本地目录查找或读取该文件。步骤 1 为强制执行预解析脚本，**禁止**跳过步骤 1 直接读取原始数据文件。**执行预解析脚本禁止直接读取 `scripts/preanalysis.sh` 脚本内容**（不得 Read/cat 脚本文件本身）：本地模式直接执行脚本；远端模式按 `opentunex-remote-execution` skill 执行方式 scp 上传脚本文件到远端后 ssh 执行，无需阅读脚本实现。
 
 ---
 
 ## 数据读取
 
-> **强制顺序**：本技能提供 `scripts/preanalysis.sh` 脚本对原始采集数据进行预处理。**必须先执行脚本生成 `preanalysis.json` 并基于 JSON 进行分析，禁止跳过预解析模式直接逐文件读取原始数据**。仅当预解析模式失败（脚本执行失败或 `preanalysis.json` 不存在，远端模式经 ssh 在远端确认）后，才允许进入下方降级路径。
+> **强制顺序**：本技能提供 `scripts/preanalysis.sh` 脚本对原始采集数据进行预处理。**必须先执行脚本生成 `preanalysis.json` 并基于 JSON 进行分析，禁止跳过预解析模式直接逐文件读取原始数据**。
 
-### 预解析模式（强制首选）：预分析 JSON
+### 预解析数据文件产出JSON
 
 1. 执行预处理脚本生成 JSON（远端模式：按 `opentunex-remote-execution` skill 执行方式 scp 上传后 `ssh -q -tt` 在远端执行，见"输入约定"执行模式章节）：
    ```bash
@@ -80,47 +80,9 @@ description: "Docker算力统筹适用性分析。分析宿主机CPU负载与容
 
 > **注意**：容器的 `cpu_usage` 和 `classification` 已由脚本基于首尾采样预计算，可直接用于 B4/B5/B6 判定，无需再手动解析 container_info.txt 的 SAMPLE 块。
 
-### 降级路径：逐文件读取（仅当预解析模式失败后）
+---
 
-> 以下为逐文件读取原始采集数据的解析规则。**仅当预解析模式已执行且确认失败后才可使用**，禁止跳过预解析模式直接进入本路径。仅在以下情况使用：
-> - `preanalysis.json` 文件不存在（远端模式：经 `ssh ${user}@${ip} "test -f ${DATA_DIR}/opentunex-docker-coordination-burst-analysis_collect/preanalysis.json"` 在远端判断，禁止在 agent 本地查找）
-> - 脚本 `preanalysis.sh` 执行失败
->
-> **⚠️ 大文件警告**：采集数据文件可能非常大，**禁止**直接 `cat`/Read 整个文件。必须按下方每个指标的提取方法（grep 关键字 / sed 定位节）**定向搜索**目标内容，只读取命中的片段；远端模式经 ssh 在远端执行 grep，只把命中片段流回上下文，禁止把整个文件拉回 agent 本地。
-
-#### 从 `${DATA_DIR}/cpu_detail_info.txt` 读取
-
-| 指标              | 提取方法                                                                                         | 默认值 |
-| --------------- | -------------------------------------------------------------------------------------------- | --- |
-| HOST\_CPU\_UTIL | 从 "/proc/stat 多采样" 节中取相邻 `cpu `  行计算 (delta\_total − delta\_idle) / delta\_total × 100，多组取平均 | 0   |
-| HOST\_NCPUS     | 搜索 "在线CPU数量" 行的数字；若无，搜索 "processor 数量" 行                                                     | 1   |
-
-#### 从 `${DATA_DIR}/kernel_config_info.txt` 读取
-
-| 指标             | 提取方法                                                                                            | 默认值 |
-| -------------- | ----------------------------------------------------------------------------------------------- | --- |
-| BURST\_SUPPORT | 搜索 "Docker CPU Burst: yes" → 支持；搜索 "sched\_soft\_runtime\_ratio" 且值不为 "not exist" → 支持；其余 → 不支持 | 不支持 |
-
-#### 从 `${DATA_DIR}/container_info.txt` 读取
-
-从 "容器 CPU 多采样观测" 节中逐采样提取每个容器的数据。每个采样块格式：
-
-```
-=== SAMPLE <N> ===
-=== TIMESTAMP <epoch> ===
---- CONTAINER ---
-id=<full_container_id>
-cfs_period_us=<value>
-cfs_quota_us=<value>
-cpuacct_usage=<value>
-soft_quota=<0|1>
-timestamp=<epoch>
---- END CONTAINER ---
-```
-
-**容器 CPU 使用率计算**：对每个容器，取首尾采样的 `cpuacct_usage` 差值除以时间间隔得实际用量。CPU 限制 = `cfs_quota_us / cfs_period_us`（若 cfs\_quota\_us > 0），否则为 HOST\_NCPUS。使用率 = 实际用量 / (CPU 限制 × 时间间隔) × 100。
-
-**阈值参数**：
+## 阈值设定
 
 | 参数                   | 默认值 | 含义         |
 | -------------------- | --- | ---------- |
