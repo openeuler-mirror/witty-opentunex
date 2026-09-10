@@ -20,8 +20,8 @@
   - `limited_benefit`：收益有限，建议实施价值不高
   - `not_applicable`：不适用，当前环境不具备实施条件
 - **融合规则作用**：
-  - **融合前过滤**：`not_applicable` 的建议不进入等价组划分和后续融合流程，直接归入 `excluded` 列表，注明"场景不适用"
-  - `limited_benefit` 的建议正常参与融合，但其 `estimated_gain.severity` 必须设为 `low`
+  - **融合前过滤（默认策略）**：`not_applicable` 和 `limited_benefit` 的建议均不进入等价组划分和后续核心融合流程，直接归入 `excluded` 列表，分别注明"场景不适用"和"收益有限"；调用方可通过会话策略 `include_limited_benefit: true` 显式纳入 `limited_benefit` 建议、`min_gain_severity: "low"` → 显示纳入 `severity: low` 建议
+  - `limited_benefit` 建议的 `estimated_gain.severity` 必须设为 `low`
 
 ### 1.1 `id`
 
@@ -91,7 +91,7 @@
   - 若瓶颈并不明显，仅作预防性优化，即使匹配效能高，也应标记为 `low`
 - **融合规则作用**：
   - **组内择优排序（第二键）**：`high` > `medium` > `low`
-  - **会话策略过滤**：可通过 `min_gain_severity` 过滤收益过低的建议
+  - **默认会话策略过滤**：协调器默认 `min_gain_severity = "medium"`，即 `severity = "low"` 的建议不进入核心融合流程，归入 `excluded` 列表（排除原因"严重度过低"）；调用方可通过 `min_gain_severity: "low"` 显式纳入
 
 #### 1.5.3 `estimated_gain.description`
 
@@ -178,7 +178,8 @@
 - 瓶颈分析子技能完成后，输出结构化建议列表（每个建议包含完整字段）
 - 同时接收可选的**会话策略对象**（如 `no_reboot: true`, `min_gain_severity: "medium"` 等）
 - 将所有建议统一为内部列表。对缺少非必填字段的，按默认值补齐：`conflicts` → `[]`，`scenario_priority` → `0`，`source` → `"skill_output"`
-- **applicability 预过滤**：将 `applicability` 为 `not_applicable` 的建议直接归入 `excluded` 列表（排除原因：场景不适用），不进入后续步骤 2-9 的核心融合流程
+- **applicability 预过滤（默认策略）**：将 `applicability` 为 `not_applicable` 和 `limited_benefit` 的建议直接归入 `excluded` 列表（排除原因分别注明"场景不适用" / "收益有限"），不进入后续步骤 2-9 的核心融合流程。调用方可通过会话策略 `include_limited_benefit: true` 显式纳入 `limited_benefit` 建议、`min_gain_severity: "low"` → 显示纳入 `severity: low` 建议
+- **severity 预过滤（默认策略）**：默认 `min_gain_severity = "medium"`，将 `estimated_gain.severity` 为 `low` 的建议也归入 `excluded` 列表（排除原因"严重度过低"），不进入核心融合流程。调用方可通过 `min_gain_severity: "low"` 显式纳入
 - 将来源为 `llm_knowledge` 的临时建议单独归类为 `supplementary`，不参与后续步骤 2-9 的核心融合流程
 - 构建**全局冲突图**和**全局依赖图**：
   - 合并每个建议自身的 `conflicts` 和 `cross_skill_relations` 中声明的 `conflicts_with`，形成无向冲突边
@@ -229,11 +230,21 @@
 
 ### 步骤 7：应用会话策略过滤
 
+> **默认会话策略（协调器内置）**：
+> - `include_limited_benefit: false` → `applicability: limited_benefit` 的建议不进入核心融合流程（已在 §步骤 1 预过滤阶段生效）
+> - `min_gain_severity: "medium"` → `severity: low` 的建议不进入核心融合流程（已在 §步骤 1 预过滤阶段生效）
+>
+> 调用方可在会话策略中显式覆盖上述默认值：
+> - `include_limited_benefit: true` → 恢复纳入 `limited_benefit` 建议
+> - `min_gain_severity: "low"` → 恢复纳入 `severity: low` 建议
+
 - 使用传入的策略对象（可为空）对 `feasible_set` 进行过滤：
   - `no_reboot: true` → 移除 `activation_requirement` 为 `system_reboot` 或 `hardware_change` 的建议
   - `no_business_restart: true` → 移除 `business_restart` 及成本更高者
   - `max_activation: "service_reload"` → 只保留 `immediate` 和 `service_reload`
-  - `min_gain_severity: "medium"` → 移除 `estimated_gain.severity` 为 `low` 的建议
+  - `min_gain_severity: "medium"` → 移除 `estimated_gain.severity` 为 `low` 的建议（默认行为）
+  - `min_gain_severity: "low"` → 显式允许 `severity: low` 的建议进入（覆盖默认）
+  - `include_limited_benefit: true` → 显式允许 `limited_benefit` 建议进入（覆盖默认）
 - 过滤导致某组主推荐被移除时，同样尝试从该组备选中递补**满足策略且无冲突、依赖满足**的替代建议
 - 若整组无满足策略的建议，则整组排除
 - 最终保留下来的建议集合即为 **primary_plan**

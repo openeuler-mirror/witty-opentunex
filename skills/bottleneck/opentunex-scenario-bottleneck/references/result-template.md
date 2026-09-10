@@ -24,7 +24,7 @@ description: 协调器 Phase 2 提取契约 — 定义从 result.md 提取字段
 | 子技能中文结论（典型表述） | applicability 枚举值 | 说明 |
 |--------------------------|---------------------|------|
 | "适用"、"建议启用"、"建议启用（高收益）"、"建议启用（中收益）" | `applicable` | 场景适用且环境支持，建议可实施；须填充完整的 `estimated_gain` 和建议内容 |
-| "收益有限"（场景匹配但当前系统不支持）、"不建议启用"（仅当原因非环境约束时） | `limited_benefit` | 收益有限，参与融合流程，但 `estimated_gain.severity` 必须设为 `low`；当原因为环境不支持时，suggestion 须标注支持缺口（详见 SB-06） |
+| "收益有限"（场景匹配但当前系统不支持）、"不建议启用"（仅当原因非环境约束时） | `limited_benefit` | **默认按协调器会话策略过滤**，归入 `excluded` 列表（排除原因"收益有限"）；`estimated_gain.severity` 必须设为 `low`；当原因为环境不支持时，suggestion 须标注支持缺口（详见 SB-06）。调用方可通过会话策略 `include_limited_benefit: true` 显式纳入、`min_gain_severity: "low"` → 显示纳入 `severity: low` 建议 |
 | "不适用"、"已启用"（无需重复操作）、"条件不满足"（irqbalance 冲突等可恢复运行时约束，且场景不匹配时） | `not_applicable` | 不适用或无需操作，直接归入 excluded 列表（排除原因：场景不适用） |
 | "不建议启用"（原因含"内核不支持"、"硬件不支持"等环境约束，**且场景条件不满足**） | `not_applicable` | 环境前置条件不满足且无瓶颈场景，非收益权衡 |
 
@@ -34,11 +34,12 @@ description: 协调器 Phase 2 提取契约 — 定义从 result.md 提取字段
 2. **区分"已启用"与"无需操作"**：特性已正确配置且无需额外调整 → `not_applicable`；特性已启用但仍有优化空间 → `applicable`
 3. **环境不支持但场景匹配（SB-06）**：当环境约束（内核不支持、硬件不支持、架构不符等）命中，但场景/收益条件满足（存在该特性可缓解的瓶颈）时 → `limited_benefit`，suggestion 须以前缀 `[当前系统不支持 X（原因），需手动引入 Y 后方可实施：{升级内核 / 加载模块 / 挂载 debugfs / 修改 BIOS 等}]` 标注支持缺口与可操作引入路径，由调用者评估是否手动引入该特性；仅当环境不支持**且**场景条件也不满足时 → `not_applicable`
 4. **一致性优先**：相同语义的中文结论在不同子技能中必须映射到相同的 `applicability` 值
+5. **默认过滤与显式覆盖**：按协调器默认会话策略，`applicability: limited_benefit` 和 `estimated_gain.severity: low` 的建议均归入 `excluded`，不进入核心融合流程；调用方可通过会话策略（`include_limited_benefit: true` / `min_gain_severity: "low"`）显式覆盖
 
 ### not_applicable / limited_benefit 时的特殊字段约定
 
 - 当 `applicability` 为 `"not_applicable"`：`activation_requirement` 设为 `"none"`，`estimated_gain.severity` 设为 `"low"`，`suggestion` 填写不适用/已启用/环境不支持的原因描述
-- 当 `applicability` 为 `"limited_benefit"`：`estimated_gain.severity` 必须设为 `"low"`，正常参与融合流程
+- 当 `applicability` 为 `"limited_benefit"`：`estimated_gain.severity` 必须设为 `"low"`，`activation_requirement` 跟随适用场景设定；**默认按协调器会话策略过滤归入 `excluded`，不参与核心融合流程**；调用方可通过 `include_limited_benefit: true` 显式纳入、`min_gain_severity: "low"` → 显示纳入 `severity: low` 建议
 
 ---
 

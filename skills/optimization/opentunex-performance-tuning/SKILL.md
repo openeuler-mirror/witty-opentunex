@@ -8,7 +8,7 @@ constraints_file: "references/constraints-tuning.md"
 # 调优执行域入口技能
 
 > **⛔ 入口门：在执行任何操作前，必须确认以下4条规则。违反任何一条即为本技能的执行失败：**
-> 
+>
 > 1. **本技能必须尝试通过子智能体工具启动调优**——不得在当前上下文中直接读取融合报告并手写调优建议。各调优技能应通过子智能体工具启动独立上下文执行。如果子智能体工具不可用或能力不足（如无法写文件），才允许降级模式，但必须标注 `execution_mode: "degraded"` 并记录降级原因。
 > 2. **在启动子智能体之前，不得读取融合报告全文**——仅提取调优方向列表用于路由，报告路径写入输入契约，由子智能体自行读取。"数据已在上下文中"不是跳过子智能体的理由。
 > 3. **本技能的职责是调度编排和汇总**——不负责调优逻辑。正确流程：创建目录 → 写契约 → 启动子智能体 → 校验输出 → 汇总报告。
@@ -60,7 +60,7 @@ constraints_file: "references/constraints-tuning.md"
 
 ### 调度声明
 
-本技能需要调度以下子智能体（按需调度，仅根据融合报告明确指定的调优方向启动）。**场景化调优子技能（numa-sched-tuning / stealtask-tuning / docker-coordination-burst-tuning / soft-domain-tuning / dynamic-smt-tuning / multi-net-path-tuning）不再由本入口直接调用，统一委派给 `opentunex-scenario-tuning` 协调器在其子智能体上下文中调度。本入口禁止再直接调用这 6 个子技能。**
+本技能需要调度以下子智能体（按需调度，仅根据融合报告明确指定的调优方向启动）。
 
 | 子智能体                                | 技能名称                                            | 输入契约路径                                                                          | 约束文件 | 输出契约路径                                                                           | 中间态建议路径                                                          |
 |-------------------------------------|-------------------------------------------------|---------------------------------------------------------------------------------|---------|----------------------------------------------------------------------------------|------------------------------------------------------------------|
@@ -70,8 +70,8 @@ constraints_file: "references/constraints-tuning.md"
 | **scenario-tuning（协调器）**           | `opentunex-scenario-tuning`                     | [report_dir]/contracts/opentunex-scenario-tuning-input.yaml                     | references/constraints-tuning.md + opentunex-scenario-tuning/references/common-constraints.md | [report_dir]/contracts/opentunex-scenario-tuning-output.yaml                     | [report_dir]/intermediate/&lt;scenario-skill&gt;.md（由协调器在其内部按需生成） |
 
 > **scenario-tuning 行说明**：
-> - 该行必须通过子智能体工具启动一个 `opentunex-scenario-tuning` 子智能体；由该子智能体在其独立上下文中调度下属 6 个场景化调优子技能（numa-sched-tuning / stealtask-tuning / docker-coordination-burst-tuning / soft-domain-tuning / dynamic-smt-tuning / multi-net-path-tuning）
-> - 本入口**禁止**再直接调用这 6 个子技能
+> - 该行必须通过子智能体工具启动一个 `opentunex-scenario-tuning` 子智能体；由该子智能体在其独立上下文中调度下属场景化调优子技能（numa-sched-tuning / stealtask-tuning / docker-coordination-burst-tuning / soft-domain-tuning / dynamic-smt-tuning / multi-net-path-tuning / btb-tuning / hisock-tuning / copy-user-tuning）
+> - 本入口**禁止**再直接调用这 9 个子技能
 > - scenario-tuning 子智能体写出场景化中间态建议到 `${WORK_DIR}/tuning/intermediate/`（与本入口的路径一致），由本入口在步骤 3 汇总阶段统一读取
 > - scenario-tuning 子智能体还需在其 `output.contract` 中确认 ST-01~ST-05 约束已遵守
 > - **硬依赖**：若 `opentunex-scenario-tuning` 不在技能注册表或启动失败，本流程直接终止并报错，不进入降级路径
@@ -103,11 +103,9 @@ constraints_file: "references/constraints-tuning.md"
 
 ### 场景化调优
 
-> **⚠️ 场景化调优已重构**：原 6 个场景化子技能（NUMA / 窃取任务 / Docker算力 / 分域调度 / 动态SMT / 网卡多路径）现在统一由 `opentunex-scenario-tuning` 协调器调度，本入口不再直接调用这些子技能。
-
 | 子技能 | 路径 | 调优方向 |
 |--------|------|---------|
-| 场景化调优协调器 | opentunex-scenario-tuning/SKILL.md | 统一调度 6 个场景化调优子技能（NUMA / 窃取任务 / Docker算力 / 分域调度 / 动态SMT / 网卡多路径） |
+| 场景化调优协调器 | opentunex-scenario-tuning/SKILL.md | 统一调度 9 个场景化调优子技能（NUMA / 窃取任务 / Docker算力 / 分域调度 / 动态SMT / 网卡多路径 / BTB / HISOCK / 拷贝优化） |
 | 推理绑核优化 | opentunex-inference-core-binding-optimization/SKILL.md | 推理核心绑核 |
 
 ### 调优方向路由映射
@@ -133,7 +131,7 @@ constraints_file: "references/constraints-tuning.md"
 
 > **⚠️ 冲突域说明**：
 > - **跨域冲突**（如 numa↔OS-CPU）：涉及本入口直接调度的子技能（os-performance-optimization）与场景化协调器（scenario-tuning）之间——由**本入口在顶层调度阶段**负责串行处理
-> - **域内冲突**（如 stealtask↔numa）：完全发生在 scenario-tuning 协调器下属 6 个子技能之间——由 `opentunex-scenario-tuning` 在其内部调度时负责串行处理（本入口无需关心）
+> - **域内冲突**（如 stealtask↔numa）：完全发生在 scenario-tuning 协调器下属子技能之间——由 `opentunex-scenario-tuning` 在其内部调度时负责串行处理（本入口无需关心）
 
 | 调优方向A | 调优方向B | 冲突资源 | 执行策略 | 冲突域 |
 |----------|----------|---------|---------|-------|
@@ -176,13 +174,13 @@ mkdir -p ${WORK_DIR}/tuning/{contracts,intermediate}
 ### 步骤 1：识别调优方向并启动子智能体【调度阶段，限制数据读取范围】
 
 > **⚠️ T-10 执行纪律检查点**：
-> 
+>
 > 在执行本步骤前，自问以下问题：
 > - 我是否已经读取了融合报告全文？如果是 → **停止**，你已经违反了 T-10 约束
 > - 我是否正打算先看完整报告再决定怎么调优？如果是 → **停止**，只读调优方向列表
 > - 我是否觉得"数据都在手边了，直接写调优建议更快"？如果是 → **这正是 T-10 要防止的可及性偏差**
 > - 融合报告路径不是 `${WORK_DIR}/analysis/` → **路径不匹配不是豁免条款**，把实际路径写入输入契约的 fusion_report 字段即可
-> 
+>
 > **正确做法**：只读调优方向列表，写契约路径（fusion_report 填实际路径），spawn 子智能体，让它们自己读融合报告全文。
 
 #### 1.1 识别调优方向（仅读取调优方向列表，禁止读取瓶颈详情和证据）
@@ -224,7 +222,7 @@ execution_context:
 constraints_file: "references/constraints-tuning.md"
 ```
 
-**scenario-tuning 协调器的输入契约模板**（注意该行启动的是协调器，不是 6 个场景化子技能本身）：
+**scenario-tuning 协调器的输入契约模板**（注意该行启动的是协调器，不是 9 个场景化子技能本身）：
 
 ```yaml
 contract_type: "input"
@@ -279,7 +277,7 @@ extra_constraints:
 
 - 若 `[report_dir]/contracts/opentunex-scenario-tuning-output.yaml` 不存在或 `status != success`，校验门 G-1 / G-2 不通过，**本流程直接终止**并提示用户：
   > "场景化调优协调器 (`opentunex-scenario-tuning`) 执行失败，请检查该技能是否已在技能注册表中注册、约束文件是否齐全、`execution_mode`/`user`/`ip` 是否正确传入。"
-- 不进入降级路径（不直接调用 6 个场景化子技能作为替代）
+- 不进入降级路径（不直接调用 9 个场景化子技能作为替代）
 - 已完成的非场景子技能结果可在错误信息中保留作为部分产出，但不写入最终 `tuning-report.md`
 
 **如果校验门未通过，不得进入步骤 3 汇总阶段。**
