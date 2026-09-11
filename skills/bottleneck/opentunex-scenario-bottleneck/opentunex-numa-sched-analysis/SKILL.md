@@ -1,6 +1,6 @@
 ---
 name: "opentunex-numa-sched-analysis"
-description: "numa并行感知调度分析。检查PARAL特性支持、分析NUMA拓扑与跨节点访问率（PMU HHA优先，vmstat/numastat降级），评估调优适用性。触发:NUMA内存不均衡、跨NUMA访问率高、NUMA瓶颈。"
+description: "numa并行感知调度分析。检查PARAL特性支持、分析NUMA拓扑与跨节点访问率（PMU HHA优先，vmstat/numastat降级），结合线程创建频率评估调优适用性。触发:NUMA内存不均衡、跨NUMA访问率高、线程高并发创建、NUMA瓶颈。"
 ---
 
 # NUMA 调度并行分析
@@ -72,6 +72,7 @@ NUMA 远程访问瓶颈的判定采用**双路径**：优先使用 PMU HHA 数�
 | `hha_available` | HHA_DEVICE | `true` → 可用（路径 A 有效）；`false` → 不可用（降级到路径 B） |
 | `ops_per_sec` | OPS_PER_SEC | 整数，HHA 每秒内存操作量 |
 | `remote_ratio` | REMOTE_RATIO | 数值百分比，如 `8.50` |
+| `thread_create_per_second` | THREAD_CREATE_PER_SECOND | 整数，每秒线程创建数（个/秒）；`null` 或缺失 → 视为无数据，跳过 N4 判定。 |
 | `pmu_path_applicable` | PMU_PATH | `true` → 使用 PMU 路径 A；`false` → 降级到路径 B（由脚本预计算） |
 | `numa_hit` | NUMA_HIT | 整数，降级路径中 numastat 本地命中数 |
 | `numa_miss` | NUMA_MISS | 整数，降级路径中 numastat 远程访问数 |
@@ -90,7 +91,7 @@ NUMA 远程访问瓶颈的判定采用**双路径**：优先使用 PMU HHA 数�
 
 按以下优先级依次判断，命中即输出。
 
-> **前置检查分类（遵守 SB-06）**：下表中 N1/N3 为"硬性不适用"，命中即短路终止；N2 为"环境不支持"，**不短路**，仅记录支持缺口 `PARAL_UNSUPPORTED_GAP`，继续进入路径 A/B 评估场景瓶颈是否存在。场景条件满足但环境不支持时，按"环境支持缺口处理"输出 `limited_benefit` 建议。
+> **前置检查分类（遵守 SB-06）**：下表中 N1/N3/N4 为"硬性不适用"，命中即短路终止；N2 为"环境不支持"，**不短路**，仅记录支持缺口 `PARAL_UNSUPPORTED_GAP`，继续进入路径 A/B 评估场景瓶颈是否存在。场景条件满足但环境不支持时，按"环境支持缺口处理"输出 `limited_benefit` 建议。
 
 ### 环境与特性前置检查
 
@@ -99,6 +100,7 @@ NUMA 远程访问瓶颈的判定采用**双路径**：优先使用 PMU HHA 数�
 | N1 | NUMA_NODES ≤ 1 | 不适用 | 单NUMA节点无需调度并行 |
 | N2 | PARAL_SUPPORT = 不支持 | 记录 `PARAL_UNSUPPORTED_GAP=true`，**继续评估**（不短路） | 内核不支持 PARAL 特性（环境支持缺口，场景匹配时仍作为建议输出，见 SB-06） |
 | N3 | PARAL_ENABLED = 已启用 | 不适用 | PARAL 特性已启用 |
+| N4 | THREAD_CREATE_PER_SECOND <= 200 | 不适用 | 线程创建频率太低，无收益 |
 
 ### 路径 A：PMU HHA 判定（精确，命中即采用）
 
@@ -147,7 +149,7 @@ NUMA 远程访问瓶颈的判定采用**双路径**：优先使用 PMU HHA 数�
 
 | 结论来源 | 预期收益 |
 |---------|---------|
-| NA4（PMU 精确判定） | 跨NUMA访问比例降低30%-50%，内存访问延迟降低15%-30% |
+| NA3（PMU 精确判定）  | 跨NUMA访问比例降低30%-50%，内存访问延迟降低15%-30% |
 | NB3（vmstat 严重） | 跨NUMA访问比例降低30%-50%，内存访问延迟降低15%-30% |
 | NB4（vmstat 存在） | 跨NUMA访问比例降低15%-30%，内存访问延迟降低10%-20% |
 
@@ -219,12 +221,13 @@ bash scripts/numa_sched_tune.sh rollback
 | PARAL_SUPPORT | {支持/不支持} |
 | PARAL_STATUS | {已启用/未启用} |
 
-## 2. NUMA 远端访问指标
+## 2. 关键指标
 
 | 指标 | 值 | 来源 |
 |------|-----|------|
 | OPS_PER_SEC | {值 或 "N/A（无HHA设备）"} | PMU HHA |
 | REMOTE_RATIO | {X}% | {PMU HHA / vmstat 降级} |
+| THREAD_CREATE_PER_SECOND | {X} 个/s 或 "无数据" | {线程采样/差分} |
 | SCHED_UTIL_LOW_PCT | {值 或 无法获取} | /proc/sys/kernel |
 
 ## 3. 适用性评估
@@ -236,6 +239,7 @@ bash scripts/numa_sched_tune.sh rollback
 | PARAL当前状态 | {已启用/未启用} | — |
 | 操作速率门槛 | ✅/❌ | {ops值}/s vs 2,000,000 |
 | 远端访问占比 | ✅/❌ | {X}% vs {阈值}% |
+| 线程创建频率 | ✅/❌ | {X} 个/s vs 200 个/s |
 
 **综合结论**: {适用/不适用/收益有限} — {原因}
 
