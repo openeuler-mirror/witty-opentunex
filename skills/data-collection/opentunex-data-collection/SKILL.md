@@ -11,6 +11,63 @@ description: "数据采集技能。唯一采集方式：执行 scripts/bottlenec
 
 ---
 
+## 前置环境检查（必做 — 采集前先确认）
+
+执行采集前，必须先确认目标机器已安装采集依赖。**agent 仅做检查并提示缺失项，禁止自动安装**——由用户手动执行：
+
+```bash
+yum install -y sysstat util-linux iproute bc numactl ethtool iotop strace perf net-tools
+```
+
+### 必装的命令（按包映射）
+
+| 命令 | 所在包 |
+|------|--------|
+| `mpstat` `sar` `iostat` `pidstat` | `sysstat` |
+| `lsblk` `lscpu` `lsmod` `taskset` `getconf` | `util-linux` |
+| `ip` `ss` | `iproute` |
+| `bc` | `bc` |
+| `numactl` `numastat` | `numactl` |
+| `ethtool` | `ethtool` |
+| `iotop` | `iotop` |
+| `strace` | `strace` |
+| `perf` | `perf`（部分发行版在 `kernel-tools`） |
+| `netstat` `route` | `net-tools` |
+
+### 检查模板
+
+```bash
+# 一次性检查所有采集命令是否可用
+MISSING=()
+for cmd in mpstat sar iostat pidstat lsblk lscpu lsmod taskset getconf ip ss bc numactl numastat ethtool iotop strace perf netstat route; do
+  command -v "$cmd" >/dev/null 2>&1 || MISSING+=("$cmd")
+done
+if [ ${#MISSING[@]} -gt 0 ]; then
+  echo "[opentunex-data-collection] 缺少采集命令: ${MISSING[*]}"
+  echo "[opentunex-data-collection] 请用户在目标机器手动执行: yum install -y sysstat util-linux iproute bc numactl ethtool iotop strace perf net-tools"
+  echo "[opentunex-data-collection] agent 不会自动安装；安装完成前请勿继续采集。"
+  return 1 2>/dev/null || exit 1
+fi
+```
+
+- **本地采集**：直接在当前 shell 跑上面的检查
+- **远端采集**：`ssh -q ${user}@${ip} "<上面这段 for 循环>"`，在远端执行
+- **Windows agent 主机 + 远端 Linux**：本地无需检查，SSH 到远端执行上面这段即可
+
+### 发现缺失时
+
+1. 立即停止采集流程，**缺失核心命令属于前置环境问题**
+2. 把缺失命令清单（如 `perf strace netstat`）告知用户
+3. 让用户在目标机器手动执行：
+   ```bash
+   yum install -y sysstat util-linux iproute bc numactl ethtool iotop strace perf net-tools
+   ```
+4. 等待用户确认安装完成后再重新跑一遍检查
+
+> 关键原则：**agent 不代替用户执行安装命令**——这是带外操作，由用户掌握节奏与权限。
+
+---
+
 ## 采集执行：`bottleneck_data_collector.sh`
 
 ```bash
@@ -56,6 +113,8 @@ APP_PID=$(pgrep -a "$APP_NAME" | awk '$2!="Z" {print $1; exit}')
 ---
 
 ## 执行决策
+
+> 决策开始前，先做**前置环境检查**（见上节）。前置检查未通过时，下面的决策树不应进入。
 
 ```
 需要采集数据
