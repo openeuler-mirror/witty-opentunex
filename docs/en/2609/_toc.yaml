@@ -1,6 +1,6 @@
-label: witty-opentunex User Guide
+label: oeAware Intelligent Tuning User Guide
 isManual: true
 description: Intelligent performance tuning skills toolkit for Linux.
 sections:
-  - label: witty-opentunex User Guide
-    href: ./witty-opentunex_user_guide.md
+  - label: oeAware Intelligent Tuning User Guide
+    href: ./witty_opentunex_user_guide.md
