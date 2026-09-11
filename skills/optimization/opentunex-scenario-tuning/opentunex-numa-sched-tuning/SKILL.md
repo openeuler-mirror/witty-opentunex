@@ -1,6 +1,6 @@
 ---
 name: "opentunex-numa-sched-tuning"
-description: "numa并行感知调度调优建议。基于瓶颈分析结果，生成启用PARAL特性并设置sched_util_low_pct参数的调优建议报告，减少跨NUMA访问延迟（仅aarch64）。**必须使用此技能**：当瓶颈分析显示NUMA内存不均衡、跨NUMA访问率高、NUMA节点间负载差异大、需要启用PARAL特性时。触发关键词：NUMA、PARAL、sched_util_low_pct、跨NUMA访问、内存不均衡、aarch64架构调度优化、numa并行感知调度。"
+description: "numa并行感知调度调优建议。基于瓶颈分析结果，生成启用PARAL特性并设置sched_util_low_pct参数的调优建议报告，减少跨NUMA访问延迟（仅aarch64）。**必须使用此技能**：当瓶颈分析显示NUMA内存不均衡、跨NUMA访问率高、线程高并发创建、NUMA节点间负载差异大、需要启用PARAL特性时。触发关键词：NUMA、PARAL、sched_util_low_pct、跨NUMA访问、内存不均衡、线程高并发创建、aarch64架构调度优化、numa并行感知调度。"
 ---
 
 # NUMA 调度并行调优建议
@@ -166,6 +166,7 @@ esac
 | PARAL 当前状态 | 搜索 "PARAL" 和 "NO_PARAL"：包含 "PARAL" 且不包含 "NO_PARAL" → 已启用；否则 → 未启用 | 未启用 |
 | sched_util_low_pct 原始值 | 搜索 "sched_util_low_pct" 后的数值 | 无法获取 |
 | NUMA 节点数 | 搜索 "NUMA" 相关描述中的节点数量 | 1 |
+| 线程创建频率 | 搜索 "THREAD_CREATE_PER_SECOND" 后的数值 | 无数据 |
 | 适用性评估结论 | 搜索 "NUMA" 或 "numa" 相关的适用性评估结论 | 不适用 |
 
 **校验逻辑**：
@@ -205,6 +206,7 @@ esac
 - 跨NUMA访问比例
 - NUMA节点间内存分配情况
 - PARAL特性支持状态
+- 线程创建频率
 
 **影响分析**：说明跨NUMA访问对业务的影响，如响应时间、吞吐量等
 
