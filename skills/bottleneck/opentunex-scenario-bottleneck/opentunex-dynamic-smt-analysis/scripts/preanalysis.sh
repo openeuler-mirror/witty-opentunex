@@ -134,21 +134,15 @@ extract_cpu_info() {
 # 从 kernel_config_info.txt 提取 SCHED_SUPPORT (KEEP_ON_CORE)
 extract_sched_info() {
     local kfile="$1"
-    local sched_support="未知"
+    local sched_support="不支持"
 
     [[ ! -f "$kfile" ]] && { echo "$sched_support"; return; }
 
     local sched_section
-    sched_section=$(sed -n '/=== 调度特性 ===/,/^=== /p' "$kfile" 2>/dev/null || true)
+    sched_section=$(awk '/=== 调度特性 ===/{f=1; next} f && /^=== /{exit} f && NF{print; exit}' "$kfile")
 
-    # 先检查 NOT present（否则 KEEP_ON_CORE.*present 会误匹配 "NOT present"）
-    if echo "$sched_section" | grep -qE 'KEEP_ON_CORE.*NOT present' 2>/dev/null; then
-        sched_support="不支持"
-    elif echo "$sched_section" | grep -qE 'KEEP_ON_CORE.*present' 2>/dev/null; then
-        sched_support="支持"
-    elif echo "$sched_section" | grep -q 'NO_KEEP_ON_CORE' 2>/dev/null; then
-        sched_support="支持"
-    elif echo "$sched_section" | grep -q 'KEEP_ON_CORE' 2>/dev/null; then
+    # 调度特性段中只要出现 KEEP_ON_CORE 或 NO_KEEP_ON_CORE 任一关键词，即视为支持
+    if echo "$sched_section" | grep -qE 'KEEP_ON_CORE|NO_KEEP_ON_CORE' 2>/dev/null; then
         sched_support="支持"
     fi
 
