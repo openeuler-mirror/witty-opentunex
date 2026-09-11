@@ -34,9 +34,11 @@ extract_static_info() {
 
     [[ ! -f "$sfile" ]] && { echo "$arch $numa_nodes $cpu_per_numa $kernel_ver"; return; }
 
-    # ARCH: 搜索 Architecture: 后的值
-    arch=$(grep -E 'Architecture:' "$sfile" | head -1 | awk '{print $2}' | tr -d '[:space:]' || true)
-    [[ -z "$arch" ]] && arch=$(grep -E 'uname -m' "$sfile" | head -1 | awk '{print $NF}' | tr -d '[:space:]' || true)
+    # ARCH: 支持英文 Architecture: / 中文 架构： + ASCII/全角冒号
+    # 锚定行首避免误匹配 CPU 内部 Architecture 15 (ARMv8) 之类的字段
+    # 用 sed 切分（中英冒号混排的 awk -F'[:：]' 在 gawk 上行为反直觉）
+    arch=$(grep -E '^\s*(Architecture|架构)\s*[:：]' "$sfile" | head -1 | sed -E 's/^[[:space:]]*(Architecture|架构)[[:space:]]*[:：]//' | tr -d '[:space:]' || true)
+    [[ -z "$arch" ]] && arch=$(grep -E '^\s*(uname -m|Machine)\s*[:：]' "$sfile" | head -1 | sed -E 's/^[[:space:]]*(uname -m|Machine)[[:space:]]*[:：]//' | tr -d '[:space:]' || true)
     [[ -z "$arch" ]] && arch="x86_64"
 
     # NUMA_NODES: 搜索 NUMA Topology 节中 node X cpus: 出现次数
@@ -161,87 +163,48 @@ extract_container_info() {
 
     [[ -z "$cfile" ]] && { echo "$container_count $small_quota_instances"; echo "[]"; return; }
 
-    # 统计容器数量: docker ps 输出中容器行数（排除表头 CONTAINER ID）
-    container_count=$(sed -n '/^CONTAINER ID/,/^$/p' "$cfile" | grep -v '^CONTAINER ID' | grep -v '^$' | wc -l 2>/dev/null || true)
-    container_count=${container_count:-0}
-    if ((container_count == 0)); then
-        # 回退: 统计非空非表头行
-        container_count=$(grep -cE '^[a-f0-9]{12}' "$cfile" 2>/dev/null || true)
+    # 统计容器数量（按优先级尝试）
+    # 优先级 1: cgroup v1 多行格式的 `===== 容器:` 区块标题
+    local header_count
+    header_count=$(grep -cE '^===== 容器:' "$cfile" 2>/dev/null || true)
+    header_count=${header_count:-0}
+    if ((header_count > 0)); then
+        container_count=$header_count
+    else
+        # 优先级 2: docker ps 表格中容器行数（排除表头 CONTAINER ID）
+        container_count=$(sed -n '/^CONTAINER ID/,/^$/p' "$cfile" | grep -v '^CONTAINER ID' | grep -v '^$' | wc -l 2>/dev/null || true)
         container_count=${container_count:-0}
+        if ((container_count == 0)); then
+            # 优先级 3: 统计以 12+ 位 hex 起始的行（容器 ID）
+            container_count=$(grep -cE '^[a-f0-9]{12}' "$cfile" 2>/dev/null || true)
+            container_count=${container_count:-0}
+        fi
     fi
 
-    # 提取每个容器的 CPU 配额
-    # docker inspect 输出通常按容器分段
-    local current_name=""
-    local nano_cpus=""
-    local cpu_quota=""
-    local cpu_period=""
-    local cpuset=""
+    # 路径 1: docker inspect JSON 格式（`"Name": "/xxx"` 引号风格）
+    if grep -qE '\"Name\":' "$cfile" 2>/dev/null; then
+        _parse_docker_inspect "$cfile" "$cpu_per_numa" quota_entries small_quota_instances
+    fi
 
-    while IFS= read -r line; do
-        # 容器名
-        if [[ "$line" =~ \"Name\":.*\"(/[a-zA-Z0-9_.-]+)\" ]]; then
-            current_name="${BASH_REMATCH[1]}"
-            current_name="${current_name#/}"
-        fi
+    # 路径 2: docker inspect 文本格式（`Name: xxx` 冒号风格, 无引号）
+    if ((${#quota_entries[@]} == 0)) && grep -qE '^Name:' "$cfile" 2>/dev/null; then
+        _parse_docker_inspect_text "$cfile" "$cpu_per_numa" quota_entries small_quota_instances
+    fi
 
-        # NanoCpus
-        if [[ "$line" =~ \"NanoCpus\":.*([0-9]+) ]]; then
-            nano_cpus="${BASH_REMATCH[1]}"
-        fi
+    # 路径 3: cgroup v1 多行（`===== 容器: <hash> =====` 标题 + Name: + cpu.cfs_quota_us）
+    if ((${#quota_entries[@]} == 0)) && grep -qE '^===== 容器:' "$cfile" 2>/dev/null; then
+        _parse_cgroup_headers "$cfile" "$cpu_per_numa" quota_entries small_quota_instances
+    fi
 
-        # CpuQuota
-        if [[ "$line" =~ \"CpuQuota\":.*([0-9]+) ]]; then
-            cpu_quota="${BASH_REMATCH[1]}"
-        fi
-
-        # CpuPeriod
-        if [[ "$line" =~ \"CpuPeriod\":.*([0-9]+) ]]; then
-            cpu_period="${BASH_REMATCH[1]}"
-        fi
-
-        # CpusetCpus
-        if [[ "$line" =~ \"CpusetCpus\":.*\"([0-9,-]+)\" ]]; then
-            cpuset="${BASH_REMATCH[1]}"
-        fi
-
-        # 容器结束标记（简单判断：遇到 } 且有 name）
-        if [[ "$line" == *"}"* ]] && [[ -n "$current_name" ]]; then
-            local quota_cpus="null"
-
-            if [[ -n "$nano_cpus" && "$nano_cpus" != "0" ]]; then
-                # NanoCpus → quota_cpus = NanoCpus / 1e9
-                quota_cpus=$(awk "BEGIN {printf \"%.2f\", ${nano_cpus}/1e9}")
-            elif [[ -n "$cpu_quota" && -n "$cpu_period" && "$cpu_period" != "0" ]]; then
-                # CpuQuota/CpuPeriod → quota_cpus = CpuQuota / CpuPeriod
-                quota_cpus=$(awk "BEGIN {printf \"%.2f\", ${cpu_quota}/${cpu_period}}")
-            elif [[ -n "$cpuset" ]]; then
-                # cpuset → 统计 CPU 数
-                quota_cpus=$(count_cpuset "$cpuset")
-            fi
-
-            if [[ "$quota_cpus" != "null" ]]; then
-                local is_small=false
-                if (( $(awk "BEGIN {print ($quota_cpus <= $cpu_per_numa) ? 1 : 0}") )); then
-                    is_small=true
-                    ((small_quota_instances++))
-                fi
-                quota_entries+=("{\"name\":\"$(json_escape "$current_name")\",\"quota_cpus\":$quota_cpus,\"is_small\":$is_small}")
-            fi
-
-            # 重置
-            current_name=""
-            nano_cpus=""
-            cpu_quota=""
-            cpu_period=""
-            cpuset=""
-        fi
-    done < "$cfile"
-
-    # 兜底：如果 JSON 解析无结果，尝试 cgroup key=value 格式（cpu.cfs_quota_us = 800000）
+    # 路径 4: cgroup v1 单行（`<name> cpu.cfs_quota_us = N` 旧格式兜底）
     if ((${#quota_entries[@]} == 0)) && grep -q 'cpu\.cfs_quota_us' "$cfile" 2>/dev/null; then
-        parse_container_cgroup "$cfile" "$cpu_per_numa"
-        return
+        _parse_cgroup_inline "$cfile" "$cpu_per_numa" quota_entries small_quota_instances
+    fi
+
+    # 兜底: 若以上统计方式均未拿到容器数（例如纯 docker inspect JSON）,
+    # 用 quota_entries 实际解析出来的容器数回填
+    if ((container_count == 0)) && ((${#quota_entries[@]} > 0)); then
+        container_count=${#quota_entries[@]}
     fi
 
     # 输出: container_count small_quota_instances
@@ -258,55 +221,220 @@ extract_container_info() {
     echo "$quota_json"
 }
 
-# 解析 cgroup v1 key=value 格式的容器信息（json 解析的兜底方案）
-# 格式示例:
-#   docker-16df4e3...  cpu.cfs_quota_us = 800000
-#   docker-abc123...   cpu.cfs_quota_us = -1
-# -1 表示无配额限制（unlimited），不纳入配额统计
-parse_container_cgroup() {
+# 把容器配额信息累加到调用方的 quota_entries / small_quota_instances
+# 用法: _record_container_quota <name> <nano_cpus> <cpu_quota> <cpu_period> <cpuset> <cpu_per_numa> <quota_entries_nameref_name> <small_quota_nameref_name>
+_record_container_quota() {
+    local name="$1"
+    local nano_cpus="$2"
+    local cpu_quota="$3"
+    local cpu_period="$4"
+    local cpuset="$5"
+    local cpu_per_numa="$6"
+    local qe_target="$7"   # 调用方数组变量名
+    local sq_target="$8"   # 调用方标量变量名
+
+    [[ -z "$name" ]] && return 0
+
+    local quota_cpus="null"
+
+    if [[ -n "$nano_cpus" && "$nano_cpus" != "0" ]]; then
+        # NanoCpus → quota_cpus = NanoCpus / 1e9
+        quota_cpus=$(awk "BEGIN {printf \"%.2f\", ${nano_cpus}/1e9}")
+    elif [[ -n "$cpu_quota" && "$cpu_quota" != "-1" && -n "$cpu_period" && "$cpu_period" != "0" ]]; then
+        # CpuQuota/CpuPeriod → quota_cpus = CpuQuota / CpuPeriod
+        # cpu_quota = -1 表示无配额限制(unlimited), 兜底过滤防止上游解析漏掉
+        quota_cpus=$(awk "BEGIN {printf \"%.2f\", ${cpu_quota}/${cpu_period}}")
+    elif [[ -n "$cpuset" ]]; then
+        # cpuset → 统计 CPU 数
+        quota_cpus=$(count_cpuset "$cpuset")
+    fi
+
+    if [[ "$quota_cpus" != "null" ]]; then
+        local is_small=false
+        if (( $(awk "BEGIN {print ($quota_cpus <= $cpu_per_numa) ? 1 : 0}") )); then
+            is_small=true
+        fi
+        # 通过变量名间接修改调用方变量
+        local -n _qe_ref="$qe_target"
+        local -n _sq_ref="$sq_target"
+        _qe_ref+=("{\"name\":\"$(json_escape "$name")\",\"quota_cpus\":$quota_cpus,\"is_small\":$is_small}")
+        if [[ "$is_small" == "true" ]]; then
+            ((_sq_ref++))
+        fi
+    fi
+}
+
+# docker inspect JSON 格式（`"Name": "/xxx"` 引号风格）
+_parse_docker_inspect() {
     local cfile="$1"
     local cpu_per_numa="$2"
+    local -n _qe="$3"
+    local -n _sq="$4"
 
-    local container_count=0
-    local small_quota_instances=0
-    declare -a quota_entries=()
+    local current_name=""
+    local nano_cpus=""
+    local cpu_quota=""
+    local cpu_period=""
+    local cpuset=""
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ \"Name\":.*\"(/[a-zA-Z0-9_.-]+)\" ]]; then
+            current_name="${BASH_REMATCH[1]}"
+            current_name="${current_name#/}"
+        fi
+        if [[ "$line" =~ \"NanoCpus\":.*([0-9]+) ]]; then
+            nano_cpus="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$line" =~ \"CpuQuota\":.*([0-9]+) ]]; then
+            cpu_quota="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$line" =~ \"CpuPeriod\":.*([0-9]+) ]]; then
+            cpu_period="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$line" =~ \"CpusetCpus\":.*\"([0-9,-]+)\" ]]; then
+            cpuset="${BASH_REMATCH[1]}"
+        fi
+
+        # 容器结束：遇到 `}` 且有 name
+        if [[ "$line" == *"}"* ]] && [[ -n "$current_name" ]]; then
+            _record_container_quota "$current_name" "$nano_cpus" "$cpu_quota" "$cpu_period" "$cpuset" "$cpu_per_numa" _qe _sq
+            current_name=""; nano_cpus=""; cpu_quota=""; cpu_period=""; cpuset=""
+        fi
+    done < "$cfile"
+}
+
+# docker inspect 文本格式（`Name: xxx` 冒号风格, 无引号）
+# 容器结束标记: `===== 容器:` 下一行 或 文件末尾
+_parse_docker_inspect_text() {
+    local cfile="$1"
+    local cpu_per_numa="$2"
+    local -n _qe="$3"
+    local -n _sq="$4"
+
+    local current_name=""
+    local nano_cpus=""
+    local cpu_quota=""
+    local cpu_period=""
+    local cpuset=""
+
+    while IFS= read -r line; do
+        # 容器分节标题（`===== 容器: <hash> =====`）→ 提交上一节
+        if [[ "$line" =~ ^=====\ 容器: ]]; then
+            if [[ -n "$current_name" ]]; then
+                _record_container_quota "$current_name" "$nano_cpus" "$cpu_quota" "$cpu_period" "$cpuset" "$cpu_per_numa" _qe _sq
+            fi
+            current_name=""; nano_cpus=""; cpu_quota=""; cpu_period=""; cpuset=""
+            continue
+        fi
+
+        # 文本格式 key: value
+        if [[ "$line" =~ ^Name:[[:space:]]*(.+)$ ]]; then
+            current_name="${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//' >/dev/null 2>&1 || true
+            current_name=$(echo "${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//')
+        fi
+        if [[ "$line" =~ ^NanoCpus:[[:space:]]*([0-9]+) ]]; then
+            nano_cpus="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$line" =~ ^CpuQuota:[[:space:]]*([0-9]+) ]]; then
+            cpu_quota="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$line" =~ ^CpuPeriod:[[:space:]]*([0-9]+) ]]; then
+            cpu_period="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$line" =~ ^CpusetCpus:[[:space:]]*([0-9,-]+) ]]; then
+            cpuset="${BASH_REMATCH[1]}"
+        fi
+    done < "$cfile"
+
+    # 文件末尾提交最后一节
+    if [[ -n "$current_name" ]]; then
+        _record_container_quota "$current_name" "$nano_cpus" "$cpu_quota" "$cpu_period" "$cpuset" "$cpu_per_numa" _qe _sq
+    fi
+}
+
+# cgroup v1 多行格式: `===== 容器: <hash> =====` 标题, 容器名取自 `Name:` 行, 配额取自 cgroup key=value
+_parse_cgroup_headers() {
+    local cfile="$1"
+    local cpu_per_numa="$2"
+    local -n _qe="$3"
+    local -n _sq="$4"
+
+    local current_hash=""
+    local current_name=""
+    local nano_cpus=""
+    local cpu_quota=""
+    local cpu_period=""
+    local cpuset=""
+
+    while IFS= read -r line; do
+        # 容器分节标题
+        if [[ "$line" =~ ^=====\ 容器:[[:space:]]*([a-f0-9]+) ]]; then
+            if [[ -n "$current_name" || -n "$current_hash" ]]; then
+                _record_container_quota "${current_name:-$current_hash}" "$nano_cpus" "$cpu_quota" "$cpu_period" "$cpuset" "$cpu_per_numa" _qe _sq
+            fi
+            current_hash="${BASH_REMATCH[1]}"
+            current_name=""; nano_cpus=""; cpu_quota=""; cpu_period=""; cpuset=""
+            continue
+        fi
+
+        # 容器名（`Name: cpu-load` 在 `## 容器元数据` 区块内）
+        if [[ "$line" =~ ^Name:[[:space:]]*(.+)$ ]]; then
+            current_name=$(echo "${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//')
+        fi
+
+        # 文本格式元数据（如果有）
+        if [[ "$line" =~ ^NanoCpus:[[:space:]]*([0-9]+) ]]; then
+            nano_cpus="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$line" =~ ^CpusetCpus:[[:space:]]*([0-9,-]+) ]]; then
+            cpuset="${BASH_REMATCH[1]}"
+        fi
+
+        # cgroup v1 key=value
+        if [[ "$line" =~ cpu\.cfs_quota_us[[:space:]]*=[[:space:]]*(-?[0-9]+) ]]; then
+            cpu_quota="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$line" =~ cpu\.cfs_period_us[[:space:]]*=[[:space:]]*([0-9]+) ]]; then
+            cpu_period="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$line" =~ ^[[:space:]]*cpuset\.cpus[[:space:]]*=[[:space:]]*([0-9,-]+) ]]; then
+            cpuset="${BASH_REMATCH[1]}"
+        fi
+    done < "$cfile"
+
+    # 文件末尾提交最后一节
+    if [[ -n "$current_name" || -n "$current_hash" ]]; then
+        _record_container_quota "${current_name:-$current_hash}" "$nano_cpus" "$cpu_quota" "$cpu_period" "$cpuset" "$cpu_per_numa" _qe _sq
+    fi
+}
+
+# cgroup v1 单行格式（向后兼容）: `<name> cpu.cfs_quota_us = N`
+_parse_cgroup_inline() {
+    local cfile="$1"
+    local cpu_per_numa="$2"
+    local -n _qe="$3"
+    local -n _sq="$4"
 
     while IFS= read -r line; do
         if [[ "$line" =~ cpu\.cfs_quota_us[[:space:]]*=[[:space:]]*(-?[0-9]+) ]]; then
             local quota="${BASH_REMATCH[1]}"
-            # 从行首提取容器名（cpu.cfs_quota_us 之前的部分）
             local name="${line%%cpu.cfs_quota_us*}"
             name=$(echo "$name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            if [[ -z "$name" ]]; then
-                continue
-            fi
-
-            ((container_count++))
+            [[ -z "$name" ]] && continue
 
             if [[ "$quota" != "-1" ]]; then
                 local quota_cpus
                 quota_cpus=$(awk "BEGIN {printf \"%.2f\", ${quota}/100000}")
-                local is_small=false
-                if (( $(awk "BEGIN {print ($quota_cpus <= $cpu_per_numa) ? 1 : 0}") )); then
-                    is_small=true
-                    ((small_quota_instances++))
-                fi
-                quota_entries+=("{\"name\":\"$(json_escape "$name")\",\"quota_cpus\":$quota_cpus,\"is_small\":$is_small}")
+                local nano_cpus=""
+                _record_container_quota "$name" "$nano_cpus" "$quota" "100000" "" "$cpu_per_numa" _qe _sq
             fi
         fi
     done < "$cfile"
-
-    echo "$container_count $small_quota_instances"
-
-    local quota_json="["
-    local first=1
-    for entry in "${quota_entries[@]}"; do
-        ((first)) && first=0 || quota_json+=","
-        quota_json+="$entry"
-    done
-    quota_json+="]"
-    echo "$quota_json"
 }
+
+# 注意: cgroup v1 单行/多行/JSON/text 解析已统一通过 _parse_cgroup_inline /
+# _parse_cgroup_headers / _parse_docker_inspect / _parse_docker_inspect_text
+# 四个 _parse_* 函数实现, 由 extract_container_info 按顺序尝试。
 
 # 统计 cpuset 字符串中的 CPU 数量（如 "0-3,5,7-9" → 7）
 count_cpuset() {
