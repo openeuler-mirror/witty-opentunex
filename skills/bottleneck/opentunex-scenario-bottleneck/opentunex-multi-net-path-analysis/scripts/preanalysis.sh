@@ -85,13 +85,15 @@ ctn_set() { local _k="$1" _v="$2" _i; for _i in "${!CTN_KEYS[@]}"; do [[ "${CTN_
 build_cpu_to_numa_map() {
     local numa_map_json="$1"
     CTN_KEYS=(); CTN_VALS=()
+    # 注: regex 末尾必须允许 "（双引号），因为 extract_numa_info 输出的 numa_cpu_map 中
+    #     CPU 编号是带引号的字符串（如 ["0","1",...]），否则匹配为空，CTN_KEYS 永远是空数组
     while IFS= read -r pair; do
         [[ -z "$pair" ]] && continue
         local node_name
         node_name=$(echo "$pair" | grep -oP '"node[0-9]+"' | tr -d '"')
         [[ -z "$node_name" ]] && continue
         local cpus_str
-        cpus_str=$(echo "$pair" | grep -oP '\[[\d\s,]+\]' | tr -d '[]')
+        cpus_str=$(echo "$pair" | grep -oP '\[[\d\s,"]+\]' | tr -d '[]"')
         [[ -z "$cpus_str" ]] && continue
         local IFS=','
         local cpu_str
@@ -100,7 +102,7 @@ build_cpu_to_numa_map() {
             [[ -z "$cpu_str" ]] && continue
             ctn_set "$cpu_str" "$node_name"
         done
-    done < <(echo "$numa_map_json" | grep -oP '"node[0-9]+":\s*\[[\d\s,]+\]')
+    done < <(echo "$numa_map_json" | grep -oP '"node[0-9]+":\s*\[[\d\s,"]+\]')
 }
 
 # ============================================================
@@ -312,12 +314,47 @@ extract_interrupt_overview() {
         fi
     fi
 
-    # 回退：从 network_metrics_analysis.txt 的 IRQ Affinity 节提取
-    # 该节每行格式如: "IRQ 53: <mask>  (...)  ITS-MSI <n> Edge hns3-...-TxRx-0"
-    # 原匹配 'IRQ.*eth|eth.*IRQ' 在 hns3/mlx 等驱动上完全无命中，需扩展驱动名集合
-    if [[ -z "$eth_lines" && -n "$nfile" && -f "$nfile" ]]; then
-        eth_lines=$(command grep -iE "IRQ.*($NIC_IRQ_RE)|($NIC_IRQ_RE).*IRQ" "$nfile" 2>/dev/null \
-            | head -20 || true)
+    # 回退：从 NIC_IRQ_MAP_JSON 提取所有 cpu_list 的并集大小
+    # 修复: 原回退是 grep nfile 的 IRQ Affinity 行再喂 awk 数"非零列 cell"——
+    #       awk 默认按空格分列，会把每行的 IRQ 号（如 "53:"）+0=53、ITS-MSI 编号
+    #       （如 "27787265"）+0=27787265、真实 per-CPU 数字 + Edge 后的设备名前导数字
+    #       全都误算成 CPU，累计出"70"这种垃圾数字。
+    #       改为从 main 已构建的 NIC_IRQ_MAP_JSON（与 extract_irq_numa 同源）派生，
+    #       求所有 NIC IRQ 条目 cpu_list 的并集大小，与 per-NIC numa_span 完全一致。
+    if [[ -z "$eth_lines" ]]; then
+        local map_json="${NIC_IRQ_MAP_JSON:-}"
+        if [[ -n "$map_json" ]] && [[ "$map_json" != "{}" ]]; then
+            # NIC_IRQ_MAP_JSON 形如: {"eno1": [{"irq": N, "smp_affinity": "...", "cpu_list": [C1, C2, ...]}, ...], ...}
+            # 只有 cpu_list 字段带方括号；irq 是数字无方括号；smp_affinity 是 hex 字符串无方括号。
+            # 1) 抓出所有 "cpu_list": [...] 段；2) 取括号内数字串；3) 按逗号拆；4) 去重计数
+            local distinct_cpus
+            distinct_cpus=$(printf '%s' "$map_json" \
+                | command grep -oE '"cpu_list":[[:space:]]*\[[0-9, ]*\]' \
+                | sed -E 's/.*\[([0-9, ]*)\]/\1/' \
+                | tr ',' '\n' \
+                | tr -d ' ' \
+                | command grep -E '^[0-9]+$' \
+                | sort -un \
+                | wc -l)
+
+            if (( distinct_cpus > 0 )); then
+                if (( distinct_cpus <= 2 )); then
+                    overview="集中在少数核心(≤2)"
+                elif (( distinct_cpus <= 4 )); then
+                    overview="分布在${distinct_cpus}个核心"
+                else
+                    overview="均匀分布在${distinct_cpus}个核心"
+                fi
+                echo "$overview"
+                return
+            fi
+        fi
+        # 兜底：NIC_IRQ_MAP_JSON 不可用时仍走 nfile 老路径（理论上 main 总会提前 build，
+        #       此分支仅在外部直接调用本函数且未 export NIC_IRQ_MAP_JSON 时触发）
+        if [[ -n "$nfile" && -f "$nfile" ]]; then
+            eth_lines=$(command grep -iE "IRQ.*($NIC_IRQ_RE)|($NIC_IRQ_RE).*IRQ" "$nfile" 2>/dev/null \
+                | head -20 || true)
+        fi
     fi
 
     if [[ -z "$eth_lines" ]]; then
@@ -638,41 +675,49 @@ extract_traffic() {
 
 # 提取 IRQ 亲和，返回 NUMA span 和标注
 extract_irq_numa() {
-    local nfile="$1" iface="$2"
-    # 使用全局 CPU_TO_NUMA 映射进行 CPU→NUMA 查找
+    # 输入: nfile（兼容旧调用，忽略）, iface
+    # 依赖: 全局变量 NIC_IRQ_MAP_JSON（nic_irq_map 的 JSON 字符串，由 main() 提前 build_nic_irq_map 注入）
+    #       + CTN_KEYS/CTN_VALS（CPU→NUMA 映射，由 build_cpu_to_numa_map 注入）
+    # 行为变更：原实现用 sed 定位 "--- IRQ Affinity ... ---" 节再解析 mask，
+    #          当节是顶级节且标题不带网卡名时无法定位 → numa_span 永远是 0。
+    #          新实现直接复用 nic_irq_map[iface] 已解析的 cpu_list，跳过 sed 定位，
+    #          对顶级 / 嵌套 / 标题带名 3 种节格式都鲁棒。
+    local _nfile_unused="$1" iface="$2"
+    # 注: 必须用 :-"{}"（带引号），不能用 :-{}——bash 解析时会把内层 } 误当成参数展开的结束符，
+    #     VAR 非空时会多塞一个 } 把 JSON 搞坏
+    local irqs_json="${NIC_IRQ_MAP_JSON:-"{}"}"
 
-    local numa_span=0
-    local annotation=""
-
-    # 定位该网卡的 IRQ Affinity 节
-    local irq_section
-    irq_section=$(sed -n "/^--- IRQ Affinity.*${iface}/,/^--- /p" "$nfile" 2>/dev/null || true)
-    if [[ -z "$irq_section" ]]; then
-        irq_section=$(sed -n "/^--- ${iface} ---$/,/^--- /p" "$nfile" | sed -n '/IRQ Affinity/,/^--- /p' 2>/dev/null || true)
+    # 用 python 解析 JSON 提取该 iface 的全部 cpu（避免 bash 解析嵌套 JSON 数组）
+    local cpus_str
+    if ! cpus_str=$(NIC_IRQ_MAP_JSON="$irqs_json" iface="$iface" python3 -c '
+import json, os, sys
+d = json.loads(os.environ["NIC_IRQ_MAP_JSON"])
+iface = os.environ["iface"]
+cpus = []
+for ir in d.get(iface, []):
+    cpus.extend(ir.get("cpu_list", []))
+print(" ".join(str(c) for c in cpus))
+' 2>/dev/null); then
+        cpus_str=""
     fi
-    # 修复: 用换行符分隔避免之前 "0 " 末尾空格导致 (( numa_span == 1 )) 解析失败
-    [[ -z "$irq_section" ]] && { echo $'0\t'; return; }
+
+    # 没有 IRQ 条目（nic_irq_map[iface] 为空）→ numa_span=0（保留旧行为）
+    [[ -z "$cpus_str" ]] && { echo $'0\t'; return; }
 
     # 收集 IRQ 涉及的所有 NUMA 节点（bash 3.2 兼容：字符串累加 + sort -u 去重）
     local numa_hit=""
-    while IFS= read -r line; do
-        if [[ "$line" =~ IRQ\ [0-9]+:\ ([0-9a-fA-F,]+) ]]; then
-            local mask="${BASH_REMATCH[1]}"
-            declare -a cpus
-            read -ra cpus <<< "$(parse_affinity_to_cpus "$mask")"
-            for cpu in "${cpus[@]}"; do
-                local node; node=$(ctn_get "$cpu")
-                numa_hit="${numa_hit} ${node}"
-            done
-        fi
-    done <<< "$irq_section"
+    for cpu in $cpus_str; do
+        local node; node=$(ctn_get "$cpu")
+        numa_hit="${numa_hit} ${node}"
+    done
 
-    # 修复: 之前用 `|| echo 0` 在 grep 无匹配（退出码 1）时会追加 "0"，
-    #       导致 numa_span="0\n0" 触发 (( syntax error
-    #       改为先 `|| true` 再用 awk 显式处理
+    # 统计不同的 NUMA 节点数
+    local numa_span
     numa_span=$(echo "$numa_hit" | tr ' ' '\n' | sort -u | awk 'NF{c++} END{print c+0}')
     numa_span=${numa_span:-0}
 
+    # 派生 annotation
+    local annotation=""
     if ((numa_span >= 2)); then
         annotation="中断跨NUMA，多路径收益明确"
     elif ((numa_span == 1)); then
@@ -680,6 +725,120 @@ extract_irq_numa() {
     fi
 
     echo "$numa_span $annotation"
+}
+
+# ============================================================
+# IRQ 亲和扩展字段 (NIC_IRQ_MAP)
+# ============================================================
+
+# 从单张网卡的 IRQ Affinity 节解析 IRQ 条目列表
+# 输入: nfile, iface
+# 输出: JSON 字符串数组，格式: [{"irq":N,"smp_affinity":"<mask>","cpu_list":[C1,C2,...]}, ...]
+#       找不到节时输出 "[]"
+# 关联规则（按优先级尝试）：
+#   1) 节标题含目标 NIC（"--- IRQ Affinity eno1 ---"）
+#   2) 节标题是通用 "IRQ Affinity"，关联到文件中最近出现的物理网卡
+#   3) 节标题嵌套在 <iface> 节内（兼容老格式）
+_extract_nic_irq_entries() {
+    local nfile="$1" iface="$2"
+    local entries=""
+    local first=1
+    local irq_section=""
+
+    # 模式 1: 节标题含网卡名 (如 "--- IRQ Affinity eno1 ---")
+    if grep -qE "^--- IRQ Affinity.*${iface} ---" "$nfile" 2>/dev/null; then
+        irq_section=$(sed -n "/^--- IRQ Affinity.*${iface} ---/,/^--- /p" "$nfile" 2>/dev/null || true)
+    fi
+    # 模式 2: 用 awk 关联"最近的物理网卡"（处理 IRQ Affinity 作为顶级节出现在物理网卡节之后的情况）
+    if [[ -z "$irq_section" ]]; then
+        irq_section=$(awk -v target="$iface" '
+            BEGIN { last_phys = ""; in_irq = 0 }
+            /^--- / {
+                title = $0
+                sub(/^--- /, "", title)
+                sub(/ ---$/, "", title)
+                if (in_irq) in_irq = 0
+                if (title ~ /IRQ Affinity/) {
+                    # 关联：节标题含目标 NIC，或最近物理网卡是 target（且节标题是通用 "IRQ Affinity"）
+                    if (index(title, target) > 0 \
+                        || (title == "IRQ Affinity" && last_phys == target)) {
+                        in_irq = 1
+                    }
+                } else if (title ~ /^(eth[0-9]|en[opsx][0-9]|bond[0-9]|ib[0-9]|wlan[0-9]|wl[ps][0-9])/) {
+                    last_phys = title
+                }
+                next
+            }
+            in_irq { print }
+        ' "$nfile" 2>/dev/null || true)
+    fi
+    # 模式 3: 节标题嵌套在 <iface> 节内（兼容老格式）
+    if [[ -z "$irq_section" ]]; then
+        irq_section=$(sed -n "/^--- ${iface} ---$/,/^--- /p" "$nfile" 2>/dev/null \
+            | sed -n '/^--- IRQ Affinity/,/^--- /p' || true)
+    fi
+
+    if [[ -n "$irq_section" ]]; then
+        while IFS= read -r line; do
+            # 行格式: "IRQ <num>: <mask>  (<desc>)  <rest>"
+            if [[ "$line" =~ ^IRQ[[:space:]]+([0-9]+):[[:space:]]+([0-9a-fA-F,]+) ]]; then
+                local irq_num="${BASH_REMATCH[1]}"
+                local mask="${BASH_REMATCH[2]}"
+                local cpus
+                cpus=$(parse_affinity_to_cpus "$mask")
+
+                # 构造 cpu_list JSON 数组
+                local cpus_json="[]"
+                if [[ -n "$cpus" ]]; then
+                    cpus_json="["
+                    local cfirst=1
+                    for c in $cpus; do
+                        ((cfirst)) && cfirst=0 || cpus_json+=", "
+                        cpus_json+="$c"
+                    done
+                    cpus_json+="]"
+                fi
+
+                ((first)) && first=0 || entries+=", "
+                entries+="{\"irq\": $irq_num, \"smp_affinity\": \"$mask\", \"cpu_list\": $cpus_json}"
+            fi
+        done <<< "$irq_section"
+    fi
+
+    if [[ -z "$entries" ]]; then
+        echo "[]"
+    else
+        echo "[$entries]"
+    fi
+}
+
+# 构建 NIC_IRQ_MAP: {<iface>: [{irq, smp_affinity, cpu_list}, ...], ...}
+# 遍历每个物理网卡，找其 IRQ Affinity 节并解析为条目列表；找不到的网卡值为 []
+# 默认: 空映射 {}
+build_nic_irq_map() {
+    local nfile="$1"
+    [[ ! -f "$nfile" ]] && { echo "{}"; return; }
+
+    local result=""
+    local first=1
+
+    while IFS= read -r iface; do
+        [[ -z "$iface" ]] && continue
+        is_skip_iface "$iface" && continue
+        is_physical_nic "$iface" || continue
+
+        local irqs_json
+        irqs_json=$(_extract_nic_irq_entries "$nfile" "$iface")
+
+        ((first)) && first=0 || result+=", "
+        result+="\"$iface\": $irqs_json"
+    done < <(extract_physical_nics "$nfile")
+
+    if [[ -z "$result" ]]; then
+        echo "{}"
+    else
+        echo "{$result}"
+    fi
 }
 
 # ============================================================
@@ -856,6 +1015,15 @@ main() {
     # 构建 CPU→NUMA 映射（供 extract_irq_numa 使用）
     build_cpu_to_numa_map "$numa_cpu_map"
 
+    # ---- 提前构建 nic_irq_map（供 extract_interrupt_overview + per-NIC 循环里 extract_irq_numa 共用）----
+    # 必须在 extract_interrupt_overview 和网卡循环之前；overview 与 numa_span 都从同一份
+    # 数据派生，避免出现"overview 报 70、numa_span 报 1"这种自相矛盾的分裂。
+    # 原代码在循环之后才 build，导致 extract_irq_numa 只能 sed 定位 IRQ 节，遇到顶级
+    # "--- IRQ Affinity ---" 节时定位失败 → numa_span 永远 0。
+    local nic_irq_map
+    nic_irq_map=$(build_nic_irq_map "$NFILE")
+    export NIC_IRQ_MAP_JSON="$nic_irq_map"
+
     local interrupt_overview
     interrupt_overview=$(extract_interrupt_overview "$CFILE" "$NFILE")
 
@@ -906,14 +1074,14 @@ main() {
             if ((max_q_int > 1)); then
                 if (( $(awk "BEGIN {print ($rxkb_num > $RXKB_THRESHOLD) ? 1 : 0}") )); then
                     recommend_enable=true
-                elif [[ -z "$rxkb" || "$rxkb" == "0" ]]; then
+                elif (( $(awk "BEGIN {print ($rxkb_num + 0 <= 0) ? 1 : 0}") )); then
                     # 流量数据缺失 → 视为通过
                     recommend_enable=true
                 fi
             fi
         fi
 
-        # IRQ 亲和分析（简化版）
+        # IRQ 亲和分析（基于 nic_irq_map + numa_cpu_map）
         local numa_span=0 numa_annotation=""
         read -r numa_span numa_annotation <<< "$(extract_irq_numa "$NFILE" "$iface")"
 
@@ -945,11 +1113,13 @@ INNEREOF
     done
     fi  # physical_nics 非空时执行
 
+    # nic_irq_map 已在循环之前构建（见 985-990 行），这里直接用
+
     # ---- 构建 JSON ----
     local nics_json=""
     local first=1
     for entry in "${nic_json_entries[@]:-}"; do
-        ((first)) && first=0 || nics_json+=",$'\n'"
+        ((first)) && first=0 || { nics_json+=","; nics_json+=$'\n'; }
         nics_json+="$entry"
     done
 
@@ -1004,7 +1174,7 @@ INNEREOF
         [[ -z "$key" ]] && continue
         case "$key" in
             module_name)        rp_module_name="$value" ;;
-            ifnames)            rp_ifnames="$value" ;;
+            ifnames)            [[ -n "$value" ]] && rp_ifnames="$value" ;;
             appname)            rp_appname="$value" ;;
             mode)               rp_mode="$value" ;;
             strategy)           rp_strategy="$value" ;;
@@ -1035,6 +1205,7 @@ INNEREOF
   "nic_details": [
 ${nics_json}
   ],
+  "nic_irq_map": ${nic_irq_map},
   "recommended_params": {
     "module_name": "$rp_module_name",
     "ifnames": "$rp_ifnames",

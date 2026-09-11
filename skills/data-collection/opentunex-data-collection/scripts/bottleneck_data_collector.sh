@@ -1569,7 +1569,6 @@ collect_kernel_config_info() {
             cat "$SCHED_FEAT" 2>/dev/null || echo "无法读取"
             [ -w "$SCHED_FEAT" ] && echo "writable" || echo "not writable"
             grep -ow 'SOFT_DOMAIN' "$SCHED_FEAT" >/dev/null 2>&1 && echo "SOFT_DOMAIN: present" || echo "SOFT_DOMAIN: NOT present"
-            grep -ow 'KEEP_ON_CORE' "$SCHED_FEAT" >/dev/null 2>&1 && echo "KEEP_ON_CORE: present" || echo "KEEP_ON_CORE: NOT present"
             grep -ow 'PARAL' "$SCHED_FEAT" >/dev/null 2>&1 && echo "PARAL: present" || echo "PARAL: NOT present"
         else
             echo "调度特性文件不可用"
@@ -1601,10 +1600,10 @@ collect_kernel_config_info() {
         cat /proc/version 2>/dev/null
         KERNEL_VER=$(uname -r)
         if [ -f "/boot/config-${KERNEL_VER}" ]; then
-            grep -E "CONFIG_IKCONFIG|CONFIG_HZ|CONFIG_PREEMPT|CONFIG_NR_CPUS|CONFIG_HUGETLB|CONFIG_TRANSPARENT|CONFIG_CGROUP|CONFIG_NAMESPACE|CONFIG_SCHED_STEAL|CONFIG_SCHED_SMT" \
+            grep -E "CONFIG_IKCONFIG|CONFIG_HZ|CONFIG_PREEMPT|CONFIG_NR_CPUS|CONFIG_HUGETLB|CONFIG_TRANSPARENT|CONFIG_CGROUP|CONFIG_NAMESPACE|CONFIG_SCHED_STEAL|CONFIG_SCHED_SMT|CONFIG_HISOCK" \
                 "/boot/config-${KERNEL_VER}" 2>/dev/null
         elif [ -f /proc/config.gz ]; then
-            zcat /proc/config.gz 2>/dev/null | grep -E "CONFIG_IKCONFIG|CONFIG_HZ|CONFIG_PREEMPT|CONFIG_NR_CPUS|CONFIG_HUGETLB|CONFIG_TRANSPARENT|CONFIG_CGROUP|CONFIG_SCHED_STEAL|CONFIG_SCHED_SMT"
+            zcat /proc/config.gz 2>/dev/null | grep -E "CONFIG_IKCONFIG|CONFIG_HZ|CONFIG_PREEMPT|CONFIG_NR_CPUS|CONFIG_HUGETLB|CONFIG_TRANSPARENT|CONFIG_CGROUP|CONFIG_SCHED_STEAL|CONFIG_SCHED_SMT|CONFIG_HISOCK"
         else
             echo "未找到内核 config 文件"
         fi
@@ -1820,6 +1819,32 @@ collect_process_detail_info() {
         echo "--- 系统整体进程/线程数 ---"
         echo "进程总数: $(ps -e --no-headers 2>/dev/null | wc -l)"
         echo "线程总数: $(ps -eLf --no-headers 2>/dev/null | wc -l)"
+        echo ""
+
+        # 线程创建频率（用于 opentunex-numa-sched-analysis NA4/NB5 判定）
+        # 通过 5 秒窗口内对 /proc/stat 的 processes 字段做差分得到，单位 threads/s
+        # 注意：/proc/stat 的 processes 字段实际上是 fork+clone 累计值
+        # （man proc: "Number of forks since boot"），同时包含进程和线程创建。
+        # 由于绝大多数多线程服务通过 clone(CLONE_THREAD) 创建线程，该值
+        # 可作为线程创建速率的代理估计。
+        # 输出格式：thread_create_per_second=<整数>，失败时输出 null
+        echo "=== 线程创建频率 ==="
+        if [[ -r /proc/stat ]]; then
+            local __p1 __p2 __d __rate
+            __p1=$(awk '/^processes[[:space:]]+[0-9]+/{print $2; exit}' /proc/stat 2>/dev/null || true)
+            sleep 5
+            __p2=$(awk '/^processes[[:space:]]+[0-9]+/{print $2; exit}' /proc/stat 2>/dev/null || true)
+            if [[ -z "$__p1" || -z "$__p2" ]]; then
+                # 任一采样失败 → 输出 null
+                printf "thread_create_per_second=null\n"
+            else
+                __d=$((__p2 - __p1))
+                __rate=$((__d < 0 ? 0 : __d))
+                printf "thread_create_per_second=%d\n" "$__rate"
+            fi
+        else
+            printf "thread_create_per_second=null\n"
+        fi
         echo ""
 
         echo "=== 进程状态分布 ==="

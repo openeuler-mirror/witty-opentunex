@@ -1,0 +1,6 @@
+label: oeAware智能调优用户指南
+isManual: true
+description: 面向 Linux 操作系统的智能性能调优skills工具集
+sections:
+  - label: oeAware智能调优用户指南
+    href: ./witty_opentunex_user_guide.md

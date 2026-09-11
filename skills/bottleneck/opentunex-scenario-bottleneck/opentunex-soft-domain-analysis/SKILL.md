@@ -47,15 +47,15 @@ description: "分域调度分析。检查SOFT_DOMAIN特性支持、分析NUMA拓
 | 4 | 按"产出"章节模板，将决策结果写入 `${WORK_DIR}/analysis/opentunex-soft-domain-analysis_collect/result.md` | 完整分析报告（含结构化数据 JSON） |
 | 5 | 按"契约输出"章节格式写入输出契约 YAML 文件 | 契约文件 |
 
-> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。**远端模式**下 `preanalysis.json` 生成在远端服务器输出目录 `${DATA_DIR}/opentunex-soft-domain-analysis_collect/`，步骤 2 必须经 ssh `cat` 流回上下文读取，**禁止**在 agent 本地目录查找或读取该文件。步骤 1 为强制预解析模式：仅当步骤 1 执行失败或 `preanalysis.json` 不存在时才允许进入"数据读取"章节的降级路径，**禁止**跳过步骤 1 直接读取原始数据文件。**预解析模式下禁止直接读取 `scripts/preanalysis.sh` 脚本内容**（不得 Read/cat 脚本文件本身）：本地模式直接执行脚本；远端模式按 `opentunex-remote-execution` skill 执行方式 scp 上传脚本文件到远端后 ssh 执行，无需阅读脚本实现。
+> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。**远端模式**下 `preanalysis.json` 生成在远端服务器输出目录 `${DATA_DIR}/opentunex-soft-domain-analysis_collect/`，步骤 2 必须经 ssh `cat` 流回上下文读取，**禁止**在 agent 本地目录查找或读取该文件。步骤 1 为强制执行预解析脚本，**禁止**跳过步骤 1 直接读取原始数据文件。**执行预解析脚本禁止直接读取 `scripts/preanalysis.sh` 脚本内容**（不得 Read/cat 脚本文件本身）：本地模式直接执行脚本；远端模式按 `opentunex-remote-execution` skill 执行方式 scp 上传脚本文件到远端后 ssh 执行，无需阅读脚本实现。
 
 ---
 
 ## 数据读取
 
-> **强制顺序**：本技能提供 `scripts/preanalysis.sh` 脚本对原始采集数据进行预处理。**必须先执行脚本生成 `preanalysis.json` 并基于 JSON 进行分析，禁止跳过预解析模式直接逐文件读取原始数据**。仅当预解析模式失败（脚本执行失败或 `preanalysis.json` 不存在，远端模式经 ssh 在远端确认）后，才允许进入下方降级路径。
+> **强制顺序**：本技能提供 `scripts/preanalysis.sh` 脚本对原始采集数据进行预处理。**必须先执行脚本生成 `preanalysis.json` 并基于 JSON 进行分析，禁止跳过预解析模式直接逐文件读取原始数据**。
 
-### 预解析模式（强制首选）：预分析 JSON
+### 预解析数据文件产出JSON
 
 1. 执行预处理脚本生成 JSON（远端模式：按 `opentunex-remote-execution` skill 执行方式 scp 上传后 `ssh -q -tt` 在远端执行，见"输入约定"执行模式章节）：
    ```bash
@@ -85,56 +85,7 @@ description: "分域调度分析。检查SOFT_DOMAIN特性支持、分析NUMA拓
 
 > **注意**：`target_cpu_affinity_span` 已由脚本基于 `numa_cpu_map` 预计算，可直接用于决策逻辑 S3/S4 判定，无需再手动计算。
 
-### 降级路径：逐文件读取（仅当预解析模式失败后）
-
-> 以下为逐文件读取原始采集数据的解析规则。**仅当预解析模式已执行且确认失败后才可使用**，禁止跳过预解析模式直接进入本路径。仅在以下情况使用：
-> - `preanalysis.json` 文件不存在（远端模式：经 `ssh ${user}@${ip} "test -f ${DATA_DIR}/opentunex-soft-domain-analysis_collect/preanalysis.json"` 在远端判断，禁止在 agent 本地查找）
-> - 脚本 `preanalysis.sh` 执行失败
->
-> **⚠️ 大文件警告**：采集数据文件可能非常大，**禁止**直接 `cat`/Read 整个文件。必须按下方每个指标的提取方法（grep 关键字 / sed 定位节）**定向搜索**目标内容，只读取命中的片段；远端模式经 ssh 在远端执行 grep，只把命中片段流回上下文，禁止把整个文件拉回 agent 本地。
-
-#### 从 `${DATA_DIR}/static_info.txt` 读取
-
-| 指标 | 提取方法 | 默认值 |
-|------|---------|--------|
-| ARCH | 搜索 `Architecture:` 后的值（如 `aarch64`），位于 "--- System Info ---" 或 `uname -m` 输出节 | x86_64 |
-| NUMA_NODES | 搜索 `--- NUMA Topology ---` 节中 `node X cpus:` 出现次数；若无，搜索 `NUMA node(s)` 后的数字 | 1 |
-| CPU_PER_NUMA | 搜索 `--- NUMA Topology ---` 节中第一个 `node X cpus:` 的 CPU 编号个数；若无，用 `CPU(s)` / NUMA_NODES 估算 | 0 |
-| KERNEL_VER | 搜索 `Kernel:` 或 `uname -r` 输出的内核版本号 | — |
-| NUMA_CPU_MAP | 搜索 `--- NUMA Topology ---` 节，从 `numactl --hardware` 输出中解析 `node X cpus: Y Z ...` 行，建立 `NUMA节点 → [cpu列表]` 的映射 | 空映射 |
-
-#### 从 `${DATA_DIR}/kernel_config_info.txt` 读取
-
-| 指标 | 提取方法 | 默认值 |
-|------|---------|--------|
-| SOFT_DOMAIN_EXIST | 搜索 `=== 调度特性 ===` 节中 `SOFT_DOMAIN` 关键字：出现 `SOFT_DOMAIN` 词 → 存在；未出现 → 不存在 | 不存在 |
-| SOFT_DOMAIN_ENABLED | 当 SOFT_DOMAIN 存在时：出现 `SOFT_DOMAIN` 且**不含** `NO_SOFT_DOMAIN` → 已启用；含 `NO_SOFT_DOMAIN` → 未启用 | 未启用 |
-| SCHED_FEATURES_WRITABLE | 搜索 `sched_features 可写` 或类似描述（存在 `/sys/kernel/debug/sched/features` 且可写） | 不可写 |
-| DEBUGFS_MOUNTED | 搜索 `debugfs` 挂载信息（通常含 `debugfs` 关键字），或确认 `/sys/kernel/debug/` 目录存在且 `/sys/kernel/debug/sched/features` 路径可访问 | 未挂载 |
-
-#### 从 `${DATA_DIR}/docker_info.txt` 或 `${DATA_DIR}/container_info.txt` 读取
-
-| 指标 | 提取方法 | 默认值 |
-|------|---------|--------|
-| CONTAINER_COUNT | 统计 `docker ps` 输出中容器行数（排除表头） | 0 |
-| CONTAINER_QUOTA_LIST | 搜索每个容器的 CPU 配额：`docker inspect` 输出中 `NanoCpus`、`CpuQuota`/`CpuPeriod` 组 | — |
-| SMALL_QUOTA_INSTANCES | 统计配额 CPU 数 ≤ CPU_PER_NUMA 的容器数量 | 0 |
-
-**配额 CPU 数计算规则**：
-- `NanoCpus` 存在：`quota_cpus = NanoCpus / 1e9`
-- `CpuQuota`/`CpuPeriod` 存在：`quota_cpus = CpuQuota / CpuPeriod`
-- `cpuset` 存在：`quota_cpus = cpuset 指定的 CPU 数`
-- 无任何配额信息：`quota_cpus = ∞`（视为不受限，不计入小配额）
-
-#### 从 `${DATA_DIR}/top_processes.txt` 或 `${DATA_DIR}/process_info.txt` 读取（process 模式）
-
-| 指标 | 提取方法 | 默认值 |
-|------|---------|--------|
-| TARGET_PID | 用户指定的目标进程 PID，或从进程中搜索用户关注的关键进程 | — |
-| TARGET_CPUS_ALLOWED | 搜索目标进程的 `Cpus_allowed_list` | — |
-| TARGET_CPU_AFFINITY_SPAN | 统计 `Cpus_allowed_list` 跨越的 NUMA 节点数 | 1 |
-
-### 用户输入
+### 提取用户输入中可能存在的信息
 
 | 输入项 | 必需 | 说明 |
 |--------|------|------|

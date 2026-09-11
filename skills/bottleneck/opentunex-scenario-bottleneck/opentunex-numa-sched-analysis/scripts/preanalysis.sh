@@ -113,6 +113,23 @@ extract_numa_nodes() {
     echo "$nodes"
 }
 
+# 从 process_detail_info.txt 提取线程创建频率
+# 期望数据格式：thread_create_per_second=<整数>（个/秒），由数据采集器
+# collect_process_detail_info 在 5 秒窗口内对 /proc/stat 的 processes 字段
+# （实际为 fork+clone 累计值）做差分后输出；缺失或采样失败时输出
+extract_thread_create_per_second() {
+    local pdfile="$1"
+    local rate="null"
+
+    if [[ -f "$pdfile" ]]; then
+        local val
+        val=$(grep -oE 'thread_create_per_second=[0-9]+' "$pdfile" 2>/dev/null | head -1 | sed 's/thread_create_per_second=//' || true)
+        [[ -n "$val" ]] && rate="$val"
+    fi
+
+    echo "$rate"
+}
+
 # 从 kernel_config_info.txt 提取 PARAL 信息
 extract_paral_info() {
     local kfile="$1"
@@ -179,6 +196,7 @@ main() {
     local MFILE="${DATA_DIR}/memory_metrics_analysis.txt"
     local SFILE="${DATA_DIR}/static_info.txt"
     local KFILE="${DATA_DIR}/kernel_config_info.txt"
+    local PDFILE="${DATA_DIR}/process_detail_info.txt"
 
     # ---- PMU HHA 数据 ----
     local hha_available ops_per_sec remote_ratio pmu_path_applicable
@@ -192,16 +210,29 @@ main() {
     local numa_nodes
     numa_nodes=$(extract_numa_nodes "$SFILE")
 
+    # ---- 线程创建频率（来自 process_detail_info.txt） ----
+    local thread_create_per_second
+    thread_create_per_second=$(extract_thread_create_per_second "$PDFILE")
+
     # ---- PARAL 信息 ----
     local paral_support paral_enabled sched_util_low_pct
     read -r paral_support paral_enabled sched_util_low_pct <<< "$(extract_paral_info "$KFILE")"
 
     # ---- 构建 JSON ----
+    # 兼容 thread_create_per_second 为 null 的情况（数据缺失 → SKILL.md N4 跳过）
+    local tcr_json
+    if [[ "$thread_create_per_second" == "null" || -z "$thread_create_per_second" ]]; then
+        tcr_json="null"
+    else
+        tcr_json="${thread_create_per_second}"
+    fi
+
     cat > "$JSON_FILE" <<EOF
 {
   "hha_available": $hha_available,
   "ops_per_sec": ${ops_per_sec},
   "remote_ratio": ${remote_ratio},
+  "thread_create_per_second": ${tcr_json},
   "pmu_path_applicable": $pmu_path_applicable,
   "numa_hit": ${numa_hit},
   "numa_miss": ${numa_miss},

@@ -47,15 +47,15 @@ description: "窃取任务调度分析。检查CONFIG_SCHED_STEAL与STEAL特性�
 | 4 | 按"产出"章节模板，将决策结果写入 `${WORK_DIR}/analysis/opentunex-stealtask-analysis_collect/result.md` | 完整分析报告（含结构化数据 JSON） |
 | 5 | 按"契约输出"章节格式写入输出契约 YAML 文件 | 契约文件 |
 
-> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。**远端模式**下 `preanalysis.json` 生成在远端服务器输出目录 `${DATA_DIR}/opentunex-stealtask-analysis_collect/`，步骤 2 必须经 ssh `cat` 流回上下文读取，**禁止**在 agent 本地目录查找或读取该文件。步骤 1 为强制预解析模式：仅当步骤 1 执行失败或 `preanalysis.json` 不存在时才允许进入"数据读取"章节的降级路径，**禁止**跳过步骤 1 直接读取原始数据文件。**预解析模式下禁止直接读取 `scripts/preanalysis.sh` 脚本内容**（不得 Read/cat 脚本文件本身）：本地模式直接执行脚本；远端模式按 `opentunex-remote-execution` skill 执行方式 scp 上传脚本文件到远端后 ssh 执行，无需阅读脚本实现。
+> **注意**：步骤 1 仅完成数据预处理，步骤 2-5 必须继续执行。不得在生成 `preanalysis.json` 后终止流程。**远端模式**下 `preanalysis.json` 生成在远端服务器输出目录 `${DATA_DIR}/opentunex-stealtask-analysis_collect/`，步骤 2 必须经 ssh `cat` 流回上下文读取，**禁止**在 agent 本地目录查找或读取该文件。步骤 1 为强制执行预解析脚本，**禁止**跳过步骤 1 直接读取原始数据文件。**执行预解析脚本禁止直接读取 `scripts/preanalysis.sh` 脚本内容**（不得 Read/cat 脚本文件本身）：本地模式直接执行脚本；远端模式按 `opentunex-remote-execution` skill 执行方式 scp 上传脚本文件到远端后 ssh 执行，无需阅读脚本实现。
 
 ---
 
 ## 数据读取
 
-> **强制顺序**：本技能提供 `scripts/preanalysis.sh` 脚本对原始采集数据进行预处理。**必须先执行脚本生成 `preanalysis.json` 并基于 JSON 进行分析，禁止跳过预解析模式直接逐文件读取原始数据**。仅当预解析模式失败（脚本执行失败或 `preanalysis.json` 不存在，远端模式经 ssh 在远端确认）后，才允许进入下方降级路径。
+> **强制顺序**：本技能提供 `scripts/preanalysis.sh` 脚本对原始采集数据进行预处理。**必须先执行脚本生成 `preanalysis.json` 并基于 JSON 进行分析，禁止跳过预解析模式直接逐文件读取原始数据**。
 
-### 预解析模式（强制首选）：预分析 JSON
+### 预解析数据文件产出JSON
 
 1. 执行预处理脚本生成 JSON（远端模式：按 `opentunex-remote-execution` skill 执行方式 scp 上传后 `ssh -q -tt` 在远端执行，见"输入约定"执行模式章节）：
    ```bash
@@ -78,33 +78,9 @@ description: "窃取任务调度分析。检查CONFIG_SCHED_STEAL与STEAL特性�
 
 > **注意**：`cpu_imbalance` 已由脚本基于各核心 mpstat Average 行预计算，可直接用于 S4/S5/S6 判定，无需再手动计算。
 
-### 降级路径：逐文件读取（仅当预解析模式失败后）
+---
 
-> 以下为逐文件读取原始采集数据的解析规则。**仅当预解析模式已执行且确认失败后才可使用**，禁止跳过预解析模式直接进入本路径。仅在以下情况使用：
-> - `preanalysis.json` 文件不存在（远端模式：经 `ssh ${user}@${ip} "test -f ${DATA_DIR}/opentunex-stealtask-analysis_collect/preanalysis.json"` 在远端判断，禁止在 agent 本地查找）
-> - 脚本 `preanalysis.sh` 执行失败
->
-> **⚠️ 大文件警告**：采集数据文件可能非常大，**禁止**直接 `cat`/Read 整个文件。必须按下方每个指标的提取方法（grep 关键字 / sed 定位节）**定向搜索**目标内容，只读取命中的片段；远端模式经 ssh 在远端执行 grep，只把命中片段流回上下文，禁止把整个文件拉回 agent 本地。
-
-#### 从 `${DATA_DIR}/kernel_config_info.txt` 读取
-
-| 指标 | 提取方法 | 默认值 |
-|------|---------|--------|
-| CONFIG_SCHED_STEAL | 搜索 "CONFIG_SCHED_STEAL=y" → 已启用；否则搜索 "sched_steal_node_limit:" 看是否为 yes | 未启用 |
-| STEAL_SUPPORT | 搜索 "STEAL" 关键字：出现 "STEAL" 或 "NO_STEAL" → 支持；均不出现 → 不支持 | 不支持 |
-| STEAL_ENABLED | 搜索 sched_features 内容：出现 "STEAL" 且无 "NO_" 前缀 → 已启用 | 未启用 |
-| CMDLINE_STEAL_NODE_LIMIT | 搜索 "sched_steal_node_limit:"：值为 yes → 已配置；否则 → 未配置 | 未配置 |
-| STEAL_VERSION | 搜索 `sched_max_steal_count` sysctl 输出：能正常输出数值 → 旧版本；报错 "unknown key" 或无法访问 → 新版本 | 未知 |
-
-#### 从 `${DATA_DIR}/global_bottleneck.txt` 读取（若缺数据则回退到 `${DATA_DIR}/cpu_detail_info.txt`）
-
-| 指标 | 提取方法 | 默认值 |
-|------|---------|--------|
-| CPU_USAGE | 从 "各核心利用率 (mpstat)" 节中找 `Average: all` 行，100 − idle% = 使用率；若无，从 "/proc/stat 多采样" 节中取 `cpu ` 行计算 (delta_total − delta_idle) / delta_total × 100 | 0 |
-| CPU_IMBALANCE | 从 mpstat 各核心 Average 行中，max(使用率) − min(使用率) | 0 |
-| CS_RATE | vmstat 输出中 cs 列平均值 | 0 |
-
-**阈值参数**：
+## 阈值设定
 
 | 参数 | 默认值 | 含义 |
 |------|--------|------|
