@@ -75,8 +75,12 @@ description: "窃取任务调度分析。检查CONFIG_SCHED_STEAL与STEAL特性�
 | `cpu_usage` | CPU_USAGE | 数值百分比，如 `75.50` |
 | `cpu_imbalance` | CPU_IMBALANCE | 数值百分比，如 `35.20`，max(核心使用率) − min(核心使用率)（由脚本预计算） |
 | `cs_rate` | CS_RATE | 整数，vmstat cs 列平均值 |
+| `container_count` | CONTAINER_COUNT | 整数，容器数量 |
+| `container_cgroups` | CONTAINER_CGROUPS | 字符串数组，每个元素是容器的 cpu cgroup **相对路径**（例如 `system.slice/docker-xxx.scope`）；在"适用"且 `STEAL_VERSION = 新版本` 且 `CONTAINER_COUNT > 0` 时，**容器级使能命令中的 cgroup 路径必须从此数组读取具体值并拼接 `/sys/fs/cgroup/cpu/<元素值>/cpu.steal_task`**，禁止保留 `<cgroup>` 占位符、禁止凭容器 basename 推断路径、禁止使用完整绝对路径（避免双前缀） |
 
 > **注意**：`cpu_imbalance` 已由脚本基于各核心 mpstat Average 行预计算，可直接用于 S4/S5/S6 判定，无需再手动计算。
+>
+> **注意（容器 cgroup 路径来源与展开）**：容器级使能命令中的 cgroup 路径**必须**取自 `CONTAINER_CGROUPS` 数组的**每个**元素，**对每个元素各生成一条独立的命令**（不汇总、不抽样），由用户按需选择；当 `CONTAINER_COUNT > 0` 时**禁止**保留 `<cgroup>` / `<cgroup_path>` / `<container_cgroup>` 等占位符。
 
 ---
 
@@ -196,7 +200,10 @@ echo STEAL > /sys/kernel/debug/sched/features
 # 2. 重启系统
 # 3. 重启后启用 STEAL + 容器 cgroup
 echo STEAL > /sys/kernel/debug/sched/features
-echo 1 > /sys/fs/cgroup/cpu/<container_cgroup>/cpu.steal_task
+# 对 CONTAINER_CGROUPS 数组中每个元素都生成一行（依数组长度展开，由用户按需选择）
+echo 1 > /sys/fs/cgroup/cpu/<cgroup_path>/cpu.steal_task
+echo 1 > /sys/fs/cgroup/cpu/<cgroup_path>/cpu.steal_task
+...（N 行，依 CONTAINER_CGROUPS 数组长度展开，每个元素一行）
 ```
 
 ### 验证命令
@@ -204,7 +211,7 @@ echo 1 > /sys/fs/cgroup/cpu/<container_cgroup>/cpu.steal_task
 ```bash
 grep -E 'STEAL|NO_STEAL' /sys/kernel/debug/sched/features
 cat /proc/cmdline | grep -E 'sched_steal_node_limit|group_steal'
-# 容器场景:
+# 容器场景（对 CONTAINER_CGROUPS 中每个 cgroup 都验证一次，依数组长度展开）：
 cat /sys/fs/cgroup/cpu/<cgroup>/cpu.steal_task
 ```
 
@@ -213,7 +220,8 @@ cat /sys/fs/cgroup/cpu/<cgroup>/cpu.steal_task
 ```bash
 bash scripts/stealtask_tune.sh rollback
 # 或手动: echo NO_STEAL > /sys/kernel/debug/sched/features
-# 容器: echo 0 > /sys/fs/cgroup/cpu/<cgroup>/cpu.steal_task
+# 容器（依CONTAINER_CGROUPS数组长度展开，建议用户对 CONTAINER_CGROUPS 数组中每个执行过调优的cgroup各执行一次）：
+echo 0 > /sys/fs/cgroup/cpu/<cgroup>/cpu.steal_task
 # 注意: grub.cfg 中的启动参数需手动移除并重启才能完全回滚
 ```
 
@@ -243,6 +251,8 @@ bash scripts/stealtask_tune.sh rollback
 | STEAL_STATUS | {已启用/未启用} |
 | CMDLINE_STEAL_NODE_LIMIT | {已配置/未配置} |
 | STEAL_VERSION | {旧版本/新版本/未知} |
+| CONTAINER_COUNT | {CONTAINER_COUNT} |
+| CONTAINER_CGROUPS | {CONTAINER_CGROUPS} |
 
 ## 2. CPU负载与调度指标
 
@@ -283,7 +293,10 @@ bash scripts/stealtask_tune.sh rollback
 bash scripts/stealtask_tune.sh apply
 
 # 容器模式（需先在 grub.cfg 添加 group_steal 并重启）
-bash scripts/stealtask_tune.sh apply --container <cgroup_path>
+# 对 CONTAINER_CGROUPS 数组中每个元素都生成一条独立命令（依数组长度展开），由用户按需选择
+bash scripts/stealtask_tune.sh container-apply <cgroup_path_1>
+bash scripts/stealtask_tune.sh container-apply <cgroup_path_2>
+...（N 行，依 CONTAINER_CGROUPS 数组长度展开，每个元素一行）
 ```
 
 ### 验证
@@ -295,7 +308,13 @@ grep STEAL /sys/kernel/debug/sched/features
 ### 回滚
 
 ```bash
+# 宿主机模式
 bash scripts/stealtask_tune.sh rollback
+
+# 容器模式（依CONTAINER_CGROUPS数组长度展开，建议用户对 CONTAINER_CGROUPS 数组中每个执行过调优的cgroup各执行一次）
+bash scripts/stealtask_tune.sh container-rollback <cgroup_path_1>
+bash scripts/stealtask_tune.sh container-rollback <cgroup_path_2>
+...（N 行，依 CONTAINER_CGROUPS 数组长度展开，每个元素一行）
 ```
 
 ## 结构化数据

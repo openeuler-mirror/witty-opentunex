@@ -24,6 +24,20 @@
 #   network_metrics_analysis.txt - 网络指标深度分析（网卡配置/IRQ亲和/tcp等）
 # =============================================================================
 
+# 强制使用英文 locale（C.UTF-8），保证：
+#   1) sysstat 系列（mpstat/pidstat/iostat/sar）的 "Average" 关键字
+#   2) iproute2 的 ip link "UP/DOWN/UNKNOWN" 状态名
+#   3) ethtool 的 "Speed/Duplex/Link detected/driver/version/bus-info" 标签
+#   4) systemctl is-active 的 "active/inactive"
+#   5) ss / netstat / procps / util-linux 等被 gettext 翻译的表头
+#   6) free -h / df -h 以及 awk printf %.2f 的小数点（LC_NUMERIC）
+# 全部回退到 ASCII 输出，下游解析（preanalysis.sh）不再受调用方中文
+# 环境（zh_CN.UTF-8）影响。bash 子 shell 内 export 不会反向污染调用方
+# 的父进程 locale，故对终端/IDE/CI 的中文环境零侵入。
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+export LANGUAGE=C.UTF-8
+
 set -o pipefail
 
 # ---- 架构检测 ----
@@ -763,6 +777,28 @@ collect_syscall_analysis() {
             echo "============================================================"
             echo ""
         } > "$temp_file"
+
+        local perf_success=false
+        local strace_success=false
+
+        if check_command perf; then
+            echo "--- perf trace: pread64/pwrite64 ---" >> "$temp_file"
+            timeout "$DURATION" perf trace -e pread64,pwrite64 -p "$single_pid" >> "$temp_file" 2>&1
+            local rc=$?
+            if [ $rc -eq 124 ]; then
+                echo "" >> "$temp_file"
+                echo "perf trace 执行成功" >> "$temp_file"
+                perf_success=true
+                log_success "perf trace 系统调用实时分析成功 (PID=$single_pid)"
+            else
+                echo "" >> "$temp_file"
+                echo "错误: perf trace 执行失败 (exit=$rc)；常见原因：perf_paranoid 限制 / 非 root / 内核无 perf 调试接口" >> "$temp_file"
+                log_error "perf trace 系统调用实时分析失败 (PID=$single_pid)"
+            fi
+        else
+            echo "错误: perf 命令未找到，无法采集带 size 的 pread64/pwrite64 记录" >> "$temp_file"
+            log_error "perf 命令未找到"
+        fi
 
         if check_command strace; then
             echo "--- strace -c: Syscall summary ---" >> "$temp_file"
@@ -1754,12 +1790,16 @@ collect_pmu_info() {
         # perf stat remote access
         echo "=== 3. perf stat 远程访问统计 (${DURATION}秒) ==="
         if command -v perf &>/dev/null; then
-            RX_OPS_EVENT=$(perf list 2>/dev/null | grep -iE 'rx_ops' | head -1 | awk -F'[' '{print $1}' | awk '{print $1}')
-            RX_OUTER_EVENT=$(perf list 2>/dev/null | grep -iE 'rx_outer' | head -1 | awk -F'[' '{print $1}' | awk '{print $1}')
-            RX_SCCL_EVENT=$(perf list 2>/dev/null | grep -iE 'rx_sccl' | head -1 | awk -F'[' '{print $1}' | awk '{print $1}')
+            RX_OPS_EVENTS=$(perf list 2>/dev/null | grep -iE 'rx_ops_num' | awk -F'[' '{print $1}' | awk '{print $1}')
+            RX_OUTER_EVENTS=$(perf list 2>/dev/null | grep -iE 'rx_outer' | awk -F'[' '{print $1}' | awk '{print $1}')
+            RX_SCCL_EVENTS=$(perf list 2>/dev/null | grep -iE 'rx_sccl' | awk -F'[' '{print $1}' | awk '{print $1}')
 
-            if [ -n "$RX_OPS_EVENT" ] && [ -n "$RX_OUTER_EVENT" ] && [ -n "$RX_SCCL_EVENT" ]; then
-                perf stat -e "$RX_OPS_EVENT" -e "$RX_OUTER_EVENT" -e "$RX_SCCL_EVENT" -a sleep "$DURATION" 2>&1
+            if [ -n "$RX_OPS_EVENTS" ] && [ -n "$RX_OUTER_EVENTS" ] && [ -n "$RX_SCCL_EVENTS" ]; then
+                PERF_ARGS=""
+                for ev in $RX_OPS_EVENTS $RX_OUTER_EVENTS $RX_SCCL_EVENTS; do
+                    PERF_ARGS="$PERF_ARGS -e $ev"
+                done
+                perf stat -a $PERF_ARGS sleep "$DURATION" 2>&1
             else
                 echo "未找到完整的 PMU 事件 (rx_ops/rx_outer/rx_sccl)"
             fi
@@ -1768,10 +1808,12 @@ collect_pmu_info() {
 
         # Rate calculation
         echo "=== 4. 速率与远程访问占比 ==="
-        if command -v perf &>/dev/null && [ -n "${RX_OPS_EVENT:-}" ]; then
-            OPS_TOTAL=$(grep -E "$RX_OPS_EVENT" "$PMU_INFO_FILE" 2>/dev/null | grep -oE '[0-9,]+' | head -1 | tr -d ',' || echo "0")
-            OUTER_TOTAL=$(grep -E "$RX_OUTER_EVENT" "$PMU_INFO_FILE" 2>/dev/null | grep -oE '[0-9,]+' | head -1 | tr -d ',' || echo "0")
-            SCCL_TOTAL=$(grep -E "$RX_SCCL_EVENT" "$PMU_INFO_FILE" 2>/dev/null | grep -oE '[0-9,]+' | head -1 | tr -d ',' || echo "0")
+        if command -v perf &>/dev/null && [ -n "${RX_OPS_EVENTS:-}" ]; then
+            # 只匹配 perf stat 输出行（行首数字 + 空白 + 事件名），避免误抓
+            # Section 2 perf list 行中事件名里嵌入的数字（如 sccl11_hha0 中的 11、0）
+            OPS_TOTAL=$(grep -E "^[[:space:]]*[0-9,]+[[:space:]]+[^[:space:]]*/rx_ops_num/" "$PMU_INFO_FILE" 2>/dev/null | awk '{gsub(",", "", $1); sum += $1} END {print sum + 0}')
+            OUTER_TOTAL=$(grep -E "^[[:space:]]*[0-9,]+[[:space:]]+[^[:space:]]*/rx_outer/" "$PMU_INFO_FILE" 2>/dev/null | awk '{gsub(",", "", $1); sum += $1} END {print sum + 0}')
+            SCCL_TOTAL=$(grep -E "^[[:space:]]*[0-9,]+[[:space:]]+[^[:space:]]*/rx_sccl/" "$PMU_INFO_FILE" 2>/dev/null | awk '{gsub(",", "", $1); sum += $1} END {print sum + 0}')
 
             awk -v o="${OPS_TOTAL:-0}" -v x="${OUTER_TOTAL:-0}" -v s="${SCCL_TOTAL:-0}" -v d="$DURATION" \
                 'BEGIN {
@@ -1837,9 +1879,12 @@ collect_process_detail_info() {
             if [[ -z "$__p1" || -z "$__p2" ]]; then
                 # 任一采样失败 → 输出 null
                 printf "thread_create_per_second=null\n"
+            elif [[ $__p2 -lt $__p1 ]]; then
+                # 计数器回退视为采样异常（容器/PID namespace 重启、视图错位等），
+                printf "thread_create_per_second=null\n"
             else
                 __d=$((__p2 - __p1))
-                __rate=$((__d < 0 ? 0 : __d))
+                __rate=$((__d / 5))
                 printf "thread_create_per_second=%d\n" "$__rate"
             fi
         else
@@ -2102,6 +2147,8 @@ collect_container_info() {
             [ "$PURE_ID" != "$CID" ] && echo "（纯容器 ID: $PURE_ID）"
 
             CGROUP_CPU_PATH=$(get_cgroup_path cpu "$CID")
+            # 容器 cpu cgroup 绝对路径
+            echo "cgroup_path=${CGROUP_CPU_PATH}"
             CGROUP_MEM_PATH=$(get_cgroup_path memory "$CID")
             CGROUP_BLKIO_PATH=$(get_cgroup_path blkio "$CID")
             CGROUP_CPUSET_PATH=$(get_cgroup_path cpuset "$CID")

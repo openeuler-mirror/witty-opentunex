@@ -53,8 +53,8 @@ extract_steal_info() {
         fi
     fi
 
-    # CMDLINE_STEAL_NODE_LIMIT: 搜索 sched_steal_node_limit:
-    if grep -q 'sched_steal_node_limit:\s*yes' "$kfile" 2>/dev/null; then
+    # CMDLINE_STEAL_NODE_LIMIT: 搜索 sched_steal_node_limit: yes
+    if grep -qiE 'sched_steal_node_limit[[:space:]]*:[[:space:]]*yes' "$kfile" 2>/dev/null; then
         cmdline_steal_node_limit="已配置"
     fi
 
@@ -66,7 +66,7 @@ extract_steal_info() {
     local steal_version="未知"
     if grep -qE '(cannot stat|No such file|unknown key|不允许).*sched_max_steal_count' "$kfile" 2>/dev/null; then
         steal_version="新版本"
-    elif grep -qE 'sched_max_steal_count[=:][[:space:]]*[0-9]+' "$kfile" 2>/dev/null; then
+    elif grep -qE 'sched_max_steal_count[[:space:]]*[=:][[:space:]]*[0-9]+' "$kfile" 2>/dev/null; then
         steal_version="旧版本"
     fi
 
@@ -276,6 +276,27 @@ main() {
     fi
     container_count=${container_count:-0}
 
+    # ---- 容器 cgroup 路径列表 ----
+    # 从 container_info.txt 的 "cgroup_path=..." 行提取每个容器的 cpu cgroup 路径
+    # 去掉挂载前缀（v1: /sys/fs/cgroup/cpu/，v2: /sys/fs/cgroup/），保留相对路径
+    # 相对路径可直接拼接到 /sys/fs/cgroup/cpu/<相对路径>/cpu.steal_task 等模板
+    # 同时兼容 stealtask_tune.sh container-apply <相对路径> 的入参格式
+    local container_cgroups_json="[]"
+    if [[ -f "${DATA_DIR}/container_info.txt" ]]; then
+        local _paths=()
+        while IFS= read -r p; do
+            if [[ -n "$p" ]]; then
+                # 去掉 v1 cpu 挂载前缀；不匹配则尝试去掉 v2 统一层级前缀
+                p="${p#/sys/fs/cgroup/cpu/}"
+                p="${p#/sys/fs/cgroup/}"
+                _paths+=("\"$(json_escape "$p")\"")
+            fi
+        done < <(grep -E '^cgroup_path=' "${DATA_DIR}/container_info.txt" 2>/dev/null | cut -d= -f2- || true)
+        if [[ ${#_paths[@]} -gt 0 ]]; then
+            container_cgroups_json="[$(IFS=,; echo "${_paths[*]}")]"
+        fi
+    fi
+
     # ---- 构建 JSON ----
     cat > "$JSON_FILE" <<EOF
 {
@@ -288,6 +309,7 @@ main() {
   "cpu_imbalance": ${cpu_imbalance:-0},
   "cs_rate": ${cs_rate:-0},
   "numa_nodes": ${numa_nodes:-1},
+  "container_cgroups": ${container_cgroups_json},
   "container_count": ${container_count:-0}
 }
 EOF
