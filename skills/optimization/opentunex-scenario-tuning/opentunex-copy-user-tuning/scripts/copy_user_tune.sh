@@ -67,7 +67,7 @@ is_hisilicon_supported() {
     fi
     local dec
     dec=$(hex_to_dec "$part_hex")
-    if [[ "$dec" -gt "$SUPPORTED_PARTID_THRESHOLD_DEC" ]]; then
+    if [[ "$dec" -ge "$SUPPORTED_PARTID_THRESHOLD_DEC" ]]; then
         echo "true|${part_hex}|${dec}"
     else
         echo "false|${part_hex}|${dec}"
@@ -151,9 +151,9 @@ do_check() {
 
     echo "2. Hisilicon 支持 CPU 检测"
     if [[ "$is_hs" == "true" ]]; then
-        echo "   ✅ 当前为 Hisilicon 支持 CPU（partID=$part_hex_out, 十进制=$part_dec > 3330）"
+        echo "   ✅ 当前为 Hisilicon 支持 CPU（partID=$part_hex_out, 十进制=$part_dec >= 3330）"
     else
-        echo "   ❌ 当前 CPU 非 Hisilicon 支持型号（partID=$part_hex_out, 十进制=$part_dec ≤ 3330）"
+        echo "   ❌ 当前 CPU 非 Hisilicon 支持型号（partID=$part_hex_out, 十进制=$part_dec < 3330）"
         pass=false
     fi
 
@@ -237,7 +237,7 @@ do_guide() {
 【背景】在大规模数据拷贝场景（网络收发包、文件 I/O）中，__arch_copy_from_user 是内核关键热路径。
 当前内核使用 ldtr 单寄存器指令逐字节或逐字节搬运，在 Hisilicon ARM64 CPU 上无法充分利用加载指令带宽。
 应用优化补丁 PR #22481 后：
-- Hisilicon CPU（LINXICORE9100、HIP11、HIP12，partID > 0xd02）：大拷贝（≥4KB）切换到 ldp 双字加载
+- Hisilicon CPU（LINXICORE9100、HIP11、HIP12，partID >= 0xd02）：大拷贝（≥4KB）切换到 ldp 双字加载
 - 支持 FEAT_LSUI 的 CPU（ARMv8.9）：直接使用 ldtp 非特权双字加载，size 不再受限
 
 【补丁地址】

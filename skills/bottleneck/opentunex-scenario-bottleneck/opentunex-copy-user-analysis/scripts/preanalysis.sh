@@ -54,8 +54,8 @@ hex_to_dec() {
 # ARCH: aarch64/arm64 才支持
 # PART_ID_HEX: ARM CPU part ID（十六进制），如 0xd02、0xd01
 # IS_ARM64: 是否为 ARM64 架构
-# PART_ID_DEC: partID 十进制值，用于与阈值比较（> 0xd02 = 3330）
-# IS_HISILICON_SUPPORTED_CPU: 是否为支持的 Hisilicon CPU（partID > 0xd02）
+# PART_ID_DEC: partID 十进制值，用于与阈值比较（>= 0xd02 = 3330）
+# IS_HISILICON_SUPPORTED_CPU: 是否为支持的 Hisilicon CPU（partID >= 0xd02）
 extract_cpu_info() {
     local data_dir="$1"
     local arch=""
@@ -128,9 +128,9 @@ extract_cpu_info() {
         part_id_dec=$(hex_to_dec "$part_id_hex")
     fi
 
-    # IS_HISILICON_SUPPORTED_CPU: partID > 0xd02 (3330)
-    # 支持 LINXICORE9100、HIP11、HIP12 等，对应 partID > 0xd02
-    if [[ "$is_arm64" == "true" ]] && [[ "$part_id_dec" -gt 3330 ]] 2>/dev/null; then
+    # IS_HISILICON_SUPPORTED_CPU: partID >= 0xd02 (3330)
+    # 支持 LINXICORE9100、HIP11、HIP12 等，对应 partID >= 0xd02
+    if [[ "$is_arm64" == "true" ]] && [[ "$part_id_dec" -ge 3330 ]] 2>/dev/null; then
         is_hisilicon_supported=true
     fi
 
@@ -170,6 +170,16 @@ extract_hotspot_info() {
         # 提取占比百分比（perf report 的 Overhead 列）
         local pct=""
         pct=$(grep -iE '__arch_copy_(to|from)_user' "$hfile" 2>/dev/null | head -1 | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+%?$/ || $i ~ /^[0-9]+%?$/){print $i; break}}' | sed 's/%//' || true)
+
+        # 兜底: 当 hotspot_analysis.txt 是 call-graph 折叠展开格式 (例如
+        # "    --21.20%--__arch_copy_from_user")
+        if [[ -z "$pct" ]]; then
+            pct=$(grep -iE '__arch_copy_(to|from)_user' "$hfile" 2>/dev/null \
+                  | grep -oE '[0-9]+\.[0-9]+%--__arch_copy_(to|from)_user' \
+                  | awk -F'%--' '{ fn=$2; vv=$1+0; if (vv > max[fn]) max[fn]=vv } END { s=0; for (k in max) s+=max[k]; if (s>0) printf "%.2f", s; else print "" }' \
+                  || true)
+        fi
+
         if [[ -n "$pct" ]]; then
             hotspot_percent="$pct"
         fi
