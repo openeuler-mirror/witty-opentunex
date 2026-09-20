@@ -1,6 +1,6 @@
 ---
 name: "opentunex-copy-user-tuning"
-description: "copy_from_user 内核补丁调优建议。基于瓶颈分析结果，生成应用PR #22481内核补丁并启用CONFIG_ARM64_COPY_FROM_USER_OPT编译选项的调优指导报告，使用ldp/ldtp双字加载替代ldtr单寄存器指令，提升ARM64 Hisilicon CPU上数据拷贝热路径的内存带宽利用率。**必须使用此技能**：当瓶颈分析显示__arch_copy_to_user/__arch_copy_from_user热点占比高、存在>4KB大块读写、ARM64 Hisilicon支持CPU (partID > 0xd02) 时。触发关键词：copy_from_user、copy_to_user、__arch_copy、ldp、ldtp、LSUI、PR #22481、CONFIG_ARM64_COPY_FROM_USER_OPT、用户态拷贝热路径。"
+description: "copy_from_user 内核补丁调优建议。基于瓶颈分析结果，生成应用PR #22481内核补丁并启用CONFIG_ARM64_COPY_FROM_USER_OPT编译选项的调优指导报告，使用ldp/ldtp双字加载替代ldtr单寄存器指令，提升ARM64 Hisilicon CPU上数据拷贝热路径的内存带宽利用率。**必须使用此技能**：当瓶颈分析显示__arch_copy_to_user/__arch_copy_from_user热点占比高、存在>4KB大块读写、ARM64 Hisilicon支持CPU (partID >= 0xd02) 时。触发关键词：copy_from_user、copy_to_user、__arch_copy、ldp、ldtp、LSUI、PR #22481、CONFIG_ARM64_COPY_FROM_USER_OPT、用户态拷贝热路径。"
 ---
 
 # copy_from_user 内核补丁调优建议
@@ -11,7 +11,7 @@ description: "copy_from_user 内核补丁调优建议。基于瓶颈分析结果
 
 | CPU 类型 | partID 范围 | 优化路径 |
 |---------|-----------|---------|
-| Hisilicon 优化 CPU（LINXICORE9100、HIP11、HIP12） | `partID > 0xd02`（>3330） | 大拷贝（≥4KB）切换到 `ldp` 双字加载指令 |
+| Hisilicon 优化 CPU（LINXICORE9100、HIP11、HIP12） | `partID >= 0xd02`（>=3330） | 大拷贝（≥4KB）切换到 `ldp` 双字加载指令 |
 | 支持 FEAT_LSUI 的 ARMv8.9 CPU | — | 直接使用 `ldtp` 非特权双字加载，size 不受限 |
 
 > **⚠️ 本调优方向不支持一键使能——需手工下载并应用内核补丁、修改编译配置、重编内核并重启。Agent 仅生成调优指导报告与检查脚本，不自动执行内核修改或重启。**
@@ -53,7 +53,7 @@ RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "__arch
 | 输入数据 | 必需 | 说明 |
 |---------|------|------|
 | copy_from_user 适用性评估结论 | 是 | 确认是否应执行调优。格式：适用/不适用/收益有限 + 原因分析 |
-| CPU 架构与型号 | 是 | ARM64 + Hisilicon 支持 CPU（partID > 0xd02） |
+| CPU 架构与型号 | 是 | ARM64 + Hisilicon 支持 CPU（partID >= 0xd02） |
 | 热点函数信息 | 是 | `__arch_copy_to_user` / `__arch_copy_from_user` 占比与命中函数 |
 | 大块读写信息 | 是 | 是否存在 size > 4KB 的拷贝调用 |
 
@@ -200,7 +200,7 @@ esac
 | 指标 | 提取方法 | 默认值 |
 |------|---------|--------|
 | IS_ARM64 | 搜索 "ARM64\|aarch64" 关键词 | 否 |
-| IS_HISILICON_SUPPORTED_CPU | 搜索 "Hisilicon\|partID > 0xd02" 关键词 | 否 |
+| IS_HISILICON_SUPPORTED_CPU | 搜索 "Hisilicon\|partID >= 0xd02" 关键词 | 否 |
 | PART_ID_HEX | 搜索 "partID\|CPU part" 后的十六进制字符串 | 空 |
 | IS_COPY_USER_HOTSPOT | 搜索 `__arch_copy` 关键词 | false |
 | COPY_USER_FUNCS | 搜索 `__arch_copy_to_user` / `__arch_copy_from_user` 命中函数列表 | 空 |
@@ -212,7 +212,7 @@ esac
 **校验逻辑**：
 - 目录不存在 → 终止，提醒用户需要先完成瓶颈分析
 - IS_ARM64=false → 终止，提示当前非 ARM64 架构，本调优方向不适用
-- IS_HISILICON_SUPPORTED_CPU=false → 终止，提示当前 CPU 非支持的 Hisilicon 型号（partID ≤ 0xd02），本调优方向不适用
+- IS_HISILICON_SUPPORTED_CPU=false → 终止，提示当前 CPU 非支持的 Hisilicon 型号（partID < 0xd02），本调优方向不适用
 - IS_COPY_USER_HOTSPOT=false → 终止，提示未检测到 `__arch_copy` 热点，本调优方向无收益对象
 - LARGE_COPY_DETECTED=false 且 hotspot 占比 < 3% → 终止（收益有限），提示 Hisilicon 路径仅对 ≥4KB 生效或热点占比过低
 
@@ -399,7 +399,7 @@ ${WORK_DIR}/tuning/copy-user-tuning/
 
 | 约束项 | 说明 |
 |--------|------|
-| 调优前提检查结果 | ARM64 架构、partID > 0xd02、热点存在、大块读写（>4KB） |
+| 调优前提检查结果 | ARM64 架构、partID >= 0xd02、热点存在、大块读写（>4KB） |
 | 调优步骤建议 | 补丁地址 + 编译选项 + 重编内核步骤（不通过 shell 自动执行） |
 | 验证方法 | 重启后内核选项验证 + perf 指令验证 + 业务指标验证 |
 | 回滚方案 | grub 启动菜单选择旧内核 |

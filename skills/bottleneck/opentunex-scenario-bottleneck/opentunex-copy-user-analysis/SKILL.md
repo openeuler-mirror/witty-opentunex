@@ -8,7 +8,7 @@ description: "copy_from_user 拷贝优化适用性分析。检查 ARM64 CPU part
 分析 CPU 架构、热点函数和大块读写 size，评估应用 Hisilicon `copy_from_user` 优化补丁的适用性。
 
 **分析原理**：在大规模数据拷贝场景（网络收发包、文件 I/O）中，`copy_from_user` 是内核关键热路径。当前内核使用 `ldtr` 单寄存器指令逐字节或逐双字搬运，在 Hisilicon ARM64 CPU 上无法充分利用加载指令带宽。应用优化补丁（PR #22481）后：
-- Hisilicon CPU（LINXICORE9100、HIP11、HIP12，partID > 0xd02）：大拷贝（>=4KB）切换到 `ldp` 双字加载
+- Hisilicon CPU（LINXICORE9100、HIP11、HIP12，partID >= 0xd02）：大拷贝（>=4KB）切换到 `ldp` 双字加载
 - 支持 FEAT_LSUI 的 CPU（ARMv8.9）：直接使用 `ldtp` 非特权双字加载，size 不再受限
 
 > **⚠️ 本调优方向需要更新内核补丁后生效，不支持一键使能。**
@@ -76,7 +76,7 @@ description: "copy_from_user 拷贝优化适用性分析。检查 ARM64 CPU part
 | `is_arm64` | IS_ARM64 | `true` / `false`（架构为 aarch64/arm64） |
 | `part_id_hex` | PART_ID_HEX | 十六进制 partID 字符串，如 `"0xd02"` |
 | `part_id_dec` | PART_ID_DEC | 十进制 partID，如 `3330` |
-| `is_hisilicon_supported_cpu` | IS_HISILICON_SUPPORTED_CPU | `true` / `false`（ARM64 且 partID > 0xd02） |
+| `is_hisilicon_supported_cpu` | IS_HISILICON_SUPPORTED_CPU | `true` / `false`（ARM64 且 partID >= 0xd02） |
 | `is_copy_user_hotspot` | IS_COPY_USER_HOTSPOT | `true` / `false`（火焰图检测到 __arch_copy_to_user/__arch_copy_from_user） |
 | `copy_user_funcs` | COPY_USER_FUNCS | 命中的函数名列表，如 `"__arch_copy_from_user,__arch_copy_to_user"` |
 | `hotspot_percent` | HOTSPOT_PERCENT | 热点占比数值（如 `5.2` 表示 5.2%） |
@@ -92,7 +92,7 @@ description: "copy_from_user 拷贝优化适用性分析。检查 ARM64 CPU part
 
 > **前置检查分类（遵守 SB-06）**：
 > - E0 为"环境不支持"（非 ARM64 架构，硬件能力缺失），**不短路**，记录支持缺口 `COPY_USER_UNSUPPORTED_GAP`，继续评估场景条件
-> - E1 为"环境不支持"（ARM64 但 partID <= 0xd02，非支持的 Hisilicon CPU），**不短路**，记录支持缺口，继续评估场景条件
+> - E1 为"环境不支持"（ARM64 但 partID < 0xd02，非支持的 Hisilicon CPU），**不短路**，记录支持缺口，继续评估场景条件
 > - E2 为"硬性不适用"（无 copy_to_user/copy_from_user 热点，无收益对象），命中即短路
 
 ### 环境约束前置检查
@@ -100,7 +100,7 @@ description: "copy_from_user 拷贝优化适用性分析。检查 ARM64 CPU part
 | 优先级 | 条件 | 结论 | 原因 |
 |--------|------|------|------|
 | E0 | IS_ARM64 = false（CPU 不是 ARM64 架构） | 记录 `COPY_USER_UNSUPPORTED_GAP+="非ARM64架构"`，**继续评估**（不短路） | 本特性仅 ARM64 平台支持（环境支持缺口，见 SB-06） |
-| E1 | IS_ARM64 = true 且 IS_HISILICON_SUPPORTED_CPU = false（partID <= 0xd02，非支持的 Hisilicon CPU） | 记录 `COPY_USER_UNSUPPORTED_GAP+="非支持的Hisilicon CPU(partID={PART_ID_HEX})"`，**继续评估**（不短路） | 仅 LINXICORE9100/HIP11/HIP12 等（partID > 0xd02）支持（环境支持缺口，需硬件升级） |
+| E1 | IS_ARM64 = true 且 IS_HISILICON_SUPPORTED_CPU = false（partID < 0xd02，非支持的 Hisilicon CPU） | 记录 `COPY_USER_UNSUPPORTED_GAP+="非支持的Hisilicon CPU(partID={PART_ID_HEX})"`，**继续评估**（不短路） | 仅 LINXICORE9100/HIP11/HIP12 等（partID >= 0xd02）支持（环境支持缺口，需硬件升级） |
 | E2 | IS_COPY_USER_HOTSPOT = false（火焰图未检测到 __arch_copy_to_user/__arch_copy_from_user 热点） | 不适用 | 无 copy_to_user/copy_from_user 热点，优化无收益 |
 
 ### 场景模式判定
@@ -113,11 +113,11 @@ description: "copy_from_user 拷贝优化适用性分析。检查 ARM64 CPU part
 
 ### 环境支持缺口处理（SB-06）
 
-> 当 S2 命中（热点 + 大块读写，但 partID <= 0xd02 或非 ARM64），**不得直接判为"不适用"**，改按下表输出：
+> 当 S2 命中（热点 + 大块读写，但 partID < 0xd02 或非 ARM64），**不得直接判为"不适用"**，改按下表输出：
 
 | 条件 | 输出结论 | applicability | suggestion | estimated_gain.severity |
 |------|---------|--------------|-----------|------------------------|
-| S2 命中且 `COPY_USER_UNSUPPORTED_GAP` 非空 | 收益有限（环境不支持但场景匹配） | `limited_benefit` | `[当前硬件不支持（{COPY_USER_UNSUPPORTED_GAP 具体原因}），需手动引入该特性后方可实施：更换为支持优化的 Hisilicon CPU（partID > 0xd02，如 LINXICORE9100/HIP11/HIP12），并应用内核补丁 PR #22481] <原建议操作>` | `low` |
+| S2 命中且 `COPY_USER_UNSUPPORTED_GAP` 非空 | 收益有限（环境不支持但场景匹配） | `limited_benefit` | `[当前硬件不支持（{COPY_USER_UNSUPPORTED_GAP 具体原因}），需手动引入该特性后方可实施：更换为支持优化的 Hisilicon CPU（partID >= 0xd02，如 LINXICORE9100/HIP11/HIP12），并应用内核补丁 PR #22481] <原建议操作>` | `low` |
 
 **综合结论示例**：`收益有限 — 当前 CPU 非 Hisilicon 支持型号(partID=0xd01)，但火焰图检测到 __arch_copy_from_user 占 5.2%，且存在 size>4KB 的大块读写，建议更换为支持优化的 Hisilicon CPU 后应用补丁`
 
@@ -144,7 +144,7 @@ description: "copy_from_user 拷贝优化适用性分析。检查 ARM64 CPU part
 | 内核补丁 PR #22481 | 应用 ldp 双字加载优化补丁 |
 | CONFIG_ARM64_COPY_FROM_USER_OPT=y | 内核编译配置，启用 copy_from_user 优化 |
 
-> 本调优方向需要更新内核补丁并重新编译内核，不支持一键使能。仅 ARM64 + Hisilicon 支持 CPU (partID > 0xd02) 有效。
+> 本调优方向需要更新内核补丁并重新编译内核，不支持一键使能。仅 ARM64 + Hisilicon 支持 CPU (partID >= 0xd02) 有效。
 
 ### 使能步骤
 
@@ -213,7 +213,7 @@ perf record -g -- <your_workload> && perf script | grep -E 'ldp|ldtp'
 | 评估维度 | 结果 | 证据 |
 |---------|------|------|
 | ARM64 架构 | ✅/❌ | ARCH={值} |
-| Hisilicon 支持 CPU (partID > 0xd02) | ✅/❌ | PART_ID={值}，十进制={值} |
+| Hisilicon 支持 CPU (partID >= 0xd02) | ✅/❌ | PART_ID={值}，十进制={值} |
 | __arch_copy 热点存在 | ✅/❌ | 检测到 {函数名}，占比 {N}% |
 | 大块读写 (>4KB) | ✅/❌ | 最大 size={值}字节，大块调用次数={值} |
 
@@ -279,7 +279,7 @@ grep CONFIG_ARM64_COPY_FROM_USER_OPT /boot/config-$(uname -r)
 > **适用性结论 → JSON applicability 映射**：
 > - 适用（S1 命中） → `"applicable"`
 > - 不适用（E2 命中，无热点） → `"not_applicable"`
-> - 收益有限（S2 命中：环境不支持但场景匹配） → `"limited_benefit"`，suggestion 须以前缀 `[当前硬件不支持（{具体缺口原因}），需手动引入该特性后方可实施：更换为支持优化的 Hisilicon CPU（partID > 0xd02），并应用内核补丁 PR #22481] ` 标注支持缺口
+> - 收益有限（S2 命中：环境不支持但场景匹配） → `"limited_benefit"`，suggestion 须以前缀 `[当前硬件不支持（{具体缺口原因}），需手动引入该特性后方可实施：更换为支持优化的 Hisilicon CPU（partID >= 0xd02），并应用内核补丁 PR #22481] ` 标注支持缺口
 > - 收益有限（S3 命中：热点存在但未检测到大块读写） → `"limited_benefit"`，suggestion 须说明"未检测到大块读写(>4KB)，Hisilicon 路径仅对 >=4KB 生效，收益有限；若 CPU 支持 FEAT_LSUI 则仍可受益"
 
 ---
