@@ -329,8 +329,12 @@ _parse_docker_inspect_text() {
 
         # 文本格式 key: value
         if [[ "$line" =~ ^Name:[[:space:]]*(.+)$ ]]; then
-            current_name="${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//' >/dev/null 2>&1 || true
+            # 遇到下一个 Name: 时，先提交上一个容器（避免被覆盖丢失）
+            if [[ -n "$current_name" ]]; then
+                _record_container_quota "$current_name" "$nano_cpus" "$cpu_quota" "$cpu_period" "$cpuset" "$cpu_per_numa" _qe _sq
+            fi
             current_name=$(echo "${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//')
+            nano_cpus=""; cpu_quota=""; cpu_period=""; cpuset=""
         fi
         if [[ "$line" =~ ^NanoCpus:[[:space:]]*([0-9]+) ]]; then
             nano_cpus="${BASH_REMATCH[1]}"
