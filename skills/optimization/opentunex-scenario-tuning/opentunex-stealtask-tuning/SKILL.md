@@ -94,10 +94,10 @@ RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "STEAL\
 | 项目 | 说明 |
 |------|------|
 | 特性含义 | 按 cgroup 粒度控制 steal_task 特性的启用 |
-| 配置方式 | ① 在 `/boot/efi/EFI/openEuler/grub.cfg` 中添加启动项参数 `group_steal`；② 重启宿主机；③ `echo 1 > /sys/fs/cgroup/cpu/<cgroup>/cpu.steal_task` |
+| 配置方式 | ① 在 `/boot/efi/EFI/openEuler/grub.cfg` 中添加启动项参数 `group_steal`；② 重启宿主机；③ 对 `CONTAINER_CGROUPS` 数组中**每个**元素各生成一条命令（依数组长度展开，由用户按需选择）：<br/>`echo 1 > /sys/fs/cgroup/cpu/<cgroup_path_1>/cpu.steal_task`<br/>`echo 1 > /sys/fs/cgroup/cpu/<cgroup_path_2>/cpu.steal_task`<br/>...（N 行） |
 | 生效方式 | **宿主机级需重启**，**容器级立即生效** |
 | 风险等级 | 中（需重启） |
-| 恢复方式 | ① 删除 grub.cfg 中的 `group_steal` 参数；② 重启宿主机；③ `echo 0 > /sys/fs/cgroup/cpu/<cgroup>/cpu.steal_task` |
+| 恢复方式 | ① 删除 grub.cfg 中的 `group_steal` 参数；② 重启宿主机；③ 对 `CONTAINER_CGROUPS` 数组中**每个**执行过调优的元素各执行一次：<br/>`echo 0 > /sys/fs/cgroup/cpu/<cgroup>/cpu.steal_task`<br/>...（依数组长度展开） |
 
 > **⚠️ 参数约束**：当前脚本 `stealtask_tune.sh` 不自动修改 cmdline/grub.cfg 参数，仅输出提示。如需配置旧版本 `sched_steal_node_limit` 或容器 `group_steal`，需手动修改并重启。
 
@@ -116,6 +116,9 @@ RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "STEAL\
 | 应用调优 | `bash scripts/stealtask_tune.sh apply` | 启用STEAL特性（cmdline需手动配置） |
 | 查看状态 | `bash scripts/stealtask_tune.sh status` | 查看当前STEAL状态和cmdline配置 |
 | 回滚 | `bash scripts/stealtask_tune.sh rollback` | 恢复最近一次备份的状态 |
+| 容器启用 | `bash scripts/stealtask_tune.sh container-apply <cgroup名>` | 启用指定 cgroup 的 cpu.steal_task（需新版本内核 + group_steal cmdline） |
+| 容器回滚 | `bash scripts/stealtask_tune.sh container-rollback <cgroup名>` | 禁用指定 cgroup 的 cpu.steal_task |
+| 容器状态 | `bash scripts/stealtask_tune.sh container-status [cgroup名]` | 查看容器 steal_task 状态（不指定则列出所有） |
 
 > **⚠️ 说明**：调优报告中的"调优步骤"展示独立命令，目的是让用户了解具体做了什么操作、修改了哪些文件。实际执行时建议使用入口脚本 `tuning.sh`，脚本会自动完成环境检查、状态备份、调优执行、验证和回滚，并自适应 sched_features 路径。
 
@@ -241,7 +244,7 @@ if [ -n "$RESULT_FILE" ]; then
 | `CONTAINER_COUNT > 0` 但无差异化需求 | 宿主机模式（优先） | 所有进程统一使用 steal，简单高效；容器模式作为备选 |
 | `STEAL_VERSION = 旧版本` | 宿主机模式 | 旧版本不支持 `cpu.steal_task` cgroup 接口 |
 
-> **输出策略**：当 `CONTAINER_COUNT > 0` 且为**新版本**时，调优建议中应同时展示宿主机和容器两种启用路径，供用户根据实际场景选择。
+> **输出策略**：当 `CONTAINER_COUNT > 0` 且为**新版本**时，调优建议中应同时展示宿主机和容器两种启用路径；**容器级别启用路径必须对 `CONTAINER_CGROUPS` 数组中每个元素各生成一条独立的命令**（不汇总、不抽样），供用户根据实际场景选择。
 
 ---
 
@@ -275,69 +278,80 @@ if [ -n "$RESULT_FILE" ]; then
 
 ---
 
-**主方案**（根据 STEAL_VERSION 选择）：
+**宿主机模式**（按以下两个分支二选一）：
 
-**所有版本通用**：
+**宿主机模式（新版本内核，即时生效）**：
 ```bash
-# 启用STEAL特性（所有版本均需执行）
+# 1. 直接启用 STEAL
 echo STEAL > /sys/kernel/debug/sched/features
 ```
 
-**旧版本额外步骤**：
+**宿主机模式（旧版本内核，需重启）**：
 ```bash
-# 1. 编辑 /boot/efi/EFI/openEuler/grub.cfg，在启动项参数中添加 sched_steal_node_limit=4
+# 1. 编辑 /boot/efi/EFI/openEuler/grub.cfg，在启动项参数中添加 sched_steal_node_limit=<NUMA 节点数>
 # 2. 重启宿主机
-```
-
-**新版本（宿主机级别）额外步骤**：
-```bash
-# 新版本无需额外参数，只需启用 STEAL 即可
+# 3. 重启后启用 STEAL
 echo STEAL > /sys/kernel/debug/sched/features
 ```
 
 ---
 
-**备选方案（容器级别 group_steal）**：
+**容器模式（group_steal，仅新版本支持）**：
 
-> **⚠️ 必须遵守**：仅当 `CONTAINER_COUNT > 0` 且 `STEAL_VERSION = 新版本` 时，报告中**必须**附加此备选方案小节。当用户关注特定容器的隔离调优、不希望影响宿主机其他进程时，可选择此备选方案替代宿主机级别方案。
+> **⚠️ 必须遵守**：仅当 `CONTAINER_COUNT > 0` 且 `STEAL_VERSION = 新版本` 时，报告中**必须**附加此容器模式小节；小节内的使能/回滚命令必须**对 `CONTAINER_CGROUPS` 数组中每个元素各生成一条独立命令**（依数组长度展开，每个 cgroup 一行），由用户按需选择。当用户关注特定容器的隔离调优、不希望影响宿主机其他进程时，可选择此容器模式替代宿主机模式。
 
 ```bash
 # 1. 编辑 /boot/efi/EFI/openEuler/grub.cfg，在启动项参数中添加 group_steal
 # 2. 重启宿主机
-# 3. 对目标 cgroup 使能 steal_task
-echo 1 > /sys/fs/cgroup/cpu/<cgroup>/cpu.steal_task
+# 3. 对 CONTAINER_CGROUPS 数组中每个元素都生成一行（依数组长度展开，由用户按需选择）
+echo 1 > /sys/fs/cgroup/cpu/<cgroup_path_1>/cpu.steal_task
+echo 1 > /sys/fs/cgroup/cpu/<cgroup_path_2>/cpu.steal_task
+...（N 行，依 CONTAINER_CGROUPS 数组长度展开，每个元素一行）
 ```
 
-**备选方案调优脚本**：`./stealtask-tuning/tuning.sh container-apply <cgroup>`
+**容器模式调优脚本**（依数组长度展开，由用户按需选择 cgroup 执行）：
+```bash
+./stealtask-tuning/tuning.sh container-apply <cgroup_path_1>
+./stealtask-tuning/tuning.sh container-apply <cgroup_path_2>
+...（N 行，依数组长度展开）
+```
 
 ---
 
-**回滚方法**：根据实际执行的方案展示对应回滚命令。
+**回滚方法**：根据实际执行的模式展示对应回滚命令。
 
-**主方案回滚**：
+**宿主机模式回滚**（与上一步执行的分支对应）：
 
-**所有版本通用**：
+**宿主机模式回滚（新版本内核）**：
 ```bash
-# 禁用STEAL特性
+# 1. 禁用 STEAL
 echo NO_STEAL > /sys/kernel/debug/sched/features
 ```
 
-**旧版本额外回滚**：
+**宿主机模式回滚（旧版本内核，需重启）**：
 ```bash
-# 删除 grub.cfg 中的 sched_steal_node_limit 参数，重启宿主机
+# 1. 禁用 STEAL
+echo NO_STEAL > /sys/kernel/debug/sched/features
+# 2. 删除 /boot/efi/EFI/openEuler/grub.cfg 中的 sched_steal_node_limit 参数
+# 3. 重启宿主机
 ```
 
-**备选方案回滚（容器级别）**：
+**容器模式回滚**：
 
-> 仅当报告包含备选方案时展示此节。
+> 仅当报告包含容器模式时展示此节。
 
 ```bash
-# 关闭 cgroup cpu.steal_task
+# 关闭 cgroup cpu.steal_task（依CONTAINER_CGROUPS数组长度展开，建议用户对每个执行过调优的 cgroup 都执行一次）
 echo 0 > /sys/fs/cgroup/cpu/<cgroup>/cpu.steal_task
 # 删除 grub.cfg 中的 group_steal 参数，重启宿主机
 ```
 
-**备选方案回滚脚本**：`./stealtask-tuning/tuning.sh container-rollback <cgroup>`
+**容器模式回滚脚本**（依CONTAINER_CGROUPS数组长度展开，建议用户对每个执行过调优的 cgroup 都执行一次）：
+```bash
+./stealtask-tuning/tuning.sh container-rollback <cgroup_path_1>
+./stealtask-tuning/tuning.sh container-rollback <cgroup_path_2>
+...（N 行，依数组长度展开）
+```
 
 ---
 
@@ -345,7 +359,7 @@ echo 0 > /sys/fs/cgroup/cpu/<cgroup>/cpu.steal_task
 
 **验证方法**：提供验证命令，确认调优是否生效
 
-**条件性说明**：根据 STEAL_VERSION 选择对应版本的主方案。旧版本需重启，新版本宿主机级别无需重启。当 `CONTAINER_COUNT > 0` 且 `STEAL_VERSION = 新版本` 时，必须在报告中附加备选方案（容器级别 group_steal），供用户根据场景选用。
+**条件性说明**：根据 STEAL_VERSION 选择对应的宿主机模式分支。新版本内核即时生效（仅 echo STEAL）；旧版本内核需重启（grub.cfg 加参数 + 重启 + echo STEAL）。当 `CONTAINER_COUNT > 0` 且 `STEAL_VERSION = 新版本` 时，必须在报告中附加容器模式（group_steal），供用户根据场景选用。
 
 ---
 
