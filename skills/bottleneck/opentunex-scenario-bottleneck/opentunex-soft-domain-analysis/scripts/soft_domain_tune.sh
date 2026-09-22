@@ -49,14 +49,23 @@ get_soft_domain_state() {
 
 get_cpu_per_numa() {
     local nodes
-    nodes=$(lscpu 2>/dev/null | awk -F: '/^NUMA node\(s\):/{gsub(/ /, "", $2); print $2}')
-    [ -z "$nodes" ] && nodes=$(numactl --hardware 2>/dev/null | grep -c '^node ' || echo "1")
+    nodes=$(ls -d /sys/devices/system/node/node[0-9]* 2>/dev/null | wc -l)
     [ "$nodes" -eq 0 ] && nodes=1
-
-    local node0_cpus
-    node0_cpus=$(lscpu 2>/dev/null | awk -F: '/^NUMA node0 CPU\(s\):/{gsub(/ /, "", $2); print $2}' | tr ',' '\n' | wc -l)
-    if [ "$node0_cpus" -gt 0 ]; then
-        echo "$node0_cpus"
+    # 用 /sys 数实际 CPU（cpulist 里是逗号分隔的范围列表）
+    local cpu_count=0
+    if [ -r /sys/devices/system/node/node0/cpulist ]; then
+        cpu_count=$(awk -F',' '{
+            for (i=1; i<=NF; i++) {
+                if (match($i, /^([0-9]+)-([0-9]+)$/, m)) {
+                    cpu_count += m[2] - m[1] + 1
+                } else {
+                    cpu_count++
+                }
+            }
+        } END { print cpu_count+0 }' /sys/devices/system/node/node0/cpulist)
+    fi
+    if [ "$cpu_count" -gt 0 ]; then
+        echo "$cpu_count"
         return
     fi
 
