@@ -1220,6 +1220,45 @@ collect_net_metrics() {
         ip -br link show 2>/dev/null && net_success=true
         echo ""
 
+        # ---- 进程相关网卡（仅 -p 时输出）----
+        # 该段落在 process 专属的 hisock/preanalysis 链路里被优先解析，
+        # 因此格式必须稳定：标题行 "=== Process-related Network Interfaces (PID: <pid>) ==="
+        # 后面逐行列出 enp/eth/ens/enP 等物理网卡名（不含冒号或多余字段）。
+        if [[ -n "$PIDS" ]]; then
+            IFS=',' read -ra pa <<< "$PIDS"
+            for sp in "${pa[@]}"; do
+                sp=$(echo "$sp" | xargs)
+                echo "=== Process-related Network Interfaces (PID: $sp) ==="
+                if [[ ! -d "/proc/$sp" ]]; then
+                    echo "PID $sp not found"
+                    echo ""
+                    continue
+                fi
+                # 进程网络命名空间内的物理网卡（enp/eth/ens/enP，排除 lo/virbr/veth/docker/br-）
+                proc_ifaces=$(ip -br link show 2>/dev/null \
+                    | awk '$2=="UP" {print $1}' \
+                    | grep -vE '^(lo|virbr|veth|docker|br-)' \
+                    | grep -E '^(enp|eth|ens|enP)' \
+                    | sort -u || true)
+                if [[ -n "$proc_ifaces" ]]; then
+                    echo "$proc_ifaces"
+                else
+                    echo "No active physical NICs found"
+                fi
+                # 进程级 TCP 连接：附加上下文，便于人工核对每条连接流向哪张网卡
+                if command -v ss &>/dev/null; then
+                    echo ""
+                    echo "[TCP Connections of PID $sp]"
+                    ss -tnp 2>/dev/null \
+                        | grep -E "pid=${sp}([^0-9]|$)" \
+                        | head -50 \
+                        || echo "No TCP connections"
+                fi
+                echo ""
+                net_success=true
+            done
+        fi
+
         # Sysctl Config
         echo "=== Network Sysctl Configuration ==="
         for key in tcp_tw_reuse tcp_timestamps tcp_sack tcp_window_scaling tcp_congestion_control \

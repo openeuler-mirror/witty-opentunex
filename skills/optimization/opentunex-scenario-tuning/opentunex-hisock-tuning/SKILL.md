@@ -9,7 +9,7 @@ description: "hisock 网络加速调优建议。基于瓶颈分析结果，生�
 
 **调优原理**：在网络收发包场景中，数据包经过数据链路层（L2）和网络层（L3）时，netfilter 钩子会引入额外开销。当 `nf_hook*` 函数出现在热点调用栈中时，表明 netfilter 处理已成为瓶颈。hisock 通过 eBPF 程序在协议栈入口将已建链目标数据流直接转发，绕过 L2/L3 的 netfilter 开销。
 
-> **⚠️ 本调优方向不支持一键使能——需手工在内核源码目录编译 samples/bpf 工具，并由用户确认后加载 eBPF 策略。Agent 仅生成调优指导报告与编译辅助脚本，不自动执行内核编译或加载 eBPF。**
+> **⚠️ 本调优方向不支持一键使能——需手工在内核源码目录编译 samples/bpf 工具，并由用户确认后加载 eBPF 策略。Agent 仅生成调优指导报告，不自动执行内核编译或加载 eBPF。**
 
 ## 强制约束
 
@@ -36,8 +36,8 @@ RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "hisock
 - 输入契约携带 `execution_context`（`execution_mode` / `user` / `ip`）。**远端模式**（execution_mode=remote）：`${WORK_DIR}` 是**远端服务器上**的路径：
   - 读取融合报告/分析结果：经 ssh 在远端读取（`ssh -q ${user}@${ip} "grep/cat <远端文件>"`），**禁止** scp 拷回本地；下方 `find ${WORK_DIR}/analysis/ ...` 等命令在远端模式下必须写为 `ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name result.md ..."` 形式
   - 写入中间态建议/契约到 `${WORK_DIR}/tuning/...`：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端路径；**禁止**在 agent 本地创建 `${WORK_DIR}` 目录
-  - **本技能不创建脚本目录**：本技能仅产出中间态建议（`${WORK_DIR}/tuning/intermediate/hisock-tuning.md`）与输出契约；调优脚本目录 `${WORK_DIR}/tuning/hisock-tuning/` 由协调器 `opentunex-scenario-tuning` 在步骤 4 统一创建（从本技能 `scripts/` 复制基础脚本 + 生成 `tuning.sh`）。本技能**不再**负责脚本部署与入口脚本生成
-  - 本技能**不执行** 内核 samples/bpf 编译 / eBPF 加载 / 内核模块挂载（遵守 T-01/T-02）：`bash scripts/hisock_tune.sh check` 仅检查内核配置、热点与编译依赖；`compile` 子命令需用户主动执行；`apply` 子命令加载 eBPF 也必须由用户在远端服务器上手工执行；agent 不通过 ssh 代执行
+  - **本技能不创建脚本目录**：本技能仅产出中间态建议（`${WORK_DIR}/tuning/intermediate/hisock-tuning.md`）与输出契约
+  - 本技能**不执行** 内核 samples/bpf 编译 / eBPF 加载 / 内核模块挂载（遵守 T-01/T-02）
 - **本地模式**（execution_mode=local）：`${WORK_DIR}` 为 agent 本地目录，脚本部署与文件操作为本地操作。
 - 具体写法见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`。
 
@@ -103,113 +103,6 @@ RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "hisock
 
 ---
 
-## 技能调用方法
-
-### 基础脚本调用
-
-本技能依赖 `scripts/hisock_tune.sh` 脚本完成**环境检查、编译辅助、加载/卸载**操作（其中 apply/unload 必须由用户主动触发）：
-
-| 操作 | 命令 | 说明 |
-|------|------|------|
-| 环境检查 | `bash scripts/hisock_tune.sh check` | 验证 CONFIG_HISOCK、nf_hook 热点、编译工具链、cgroup 路径 |
-| 状态查询 | `bash scripts/hisock_tune.sh status` | 输出当前内核选项、热点占比、网卡/cgroup/监听端口，作为加载前基线 |
-| 编译辅助 | `bash scripts/hisock_tune.sh compile <内核源码路径>` | 在用户提供的内核源码目录下编译 hisock_cmd 与 bpf.o（用户主动执行） |
-| 加载 eBPF | `bash scripts/hisock_tune.sh apply <bpf.o路径> <cgroup> <端口> <网卡>` | 加载 eBPF 加速策略（用户主动执行） |
-| 卸载 eBPF | `bash scripts/hisock_tune.sh unload <cgroup> <网卡>` | 卸载已加载的加速（用户主动执行） |
-| 操作指南 | `bash scripts/hisock_tune.sh guide` | 输出完整编译 + 加载操作指南 |
-
-> **⚠️ 说明**：`compile`、`apply`、`unload` 子命令会修改系统状态（编译产物 / 加载 eBPF / 卸载 eBPF），必须由用户在远端服务器上手工运行；agent 不通过 ssh 代执行。
-
----
-
-## tuning.sh 动态生成说明（参考：协调器执行）
-
-> **⚠️ 职责说明**：本节为协调器 `opentunex-scenario-tuning` 生成入口脚本时使用的参考模板。**本子技能不执行此步骤**——脚本目录与 `tuning.sh` 由协调器统一创建（见协调器 SKILL.md 步骤 4）。本节保留是为了让子技能输出契约中的 `output.summary` 字段能准确说明脚本模板与基础脚本名，方便协调器引用。
-
-### 入口脚本目录结构
-
-协调器会按以下结构创建脚本目录：
-
-```
-${WORK_DIR}/tuning/hisock-tuning/
-├── tuning.sh              # 入口脚本（动态生成）
-└── hisock_tune.sh         # 基础脚本（从本技能 scripts/ 复制，含 check/compile/apply/unload）
-```
-
-### tuning.sh 模板
-
-入口脚本由大模型根据瓶颈分析结果动态生成，模板如下：
-
-```bash
-#!/bin/bash
-# hisock 网络加速调优入口脚本
-# 由调优技能根据瓶颈分析动态生成
-# 注意：本脚本只做环境检查与状态查询，apply/unload 必须由用户主动执行
-
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# 动态参数（由大模型根据瓶颈分析结果填充，必须使用分析结果中的实际值）
-# KERNEL_SRC: 内核源码路径（用于编译 hisock 工具），用户需提供
-# BPF_O: 编译产物 bpf.o 的目标路径（默认与 hisock_cmd 同目录）
-# RECOMMENDED_CGROUP: 推荐的 cgroup 路径（来自分析结果）
-# RECOMMENDED_PORTS: 推荐的端口范围（来自分析结果）
-# RECOMMENDED_NIC: 推荐的网卡设备（来自分析结果）
-KERNEL_SRC="<KERNEL_SRC>"
-BPF_O="<BPF_O_PATH>"
-RECOMMENDED_CGROUP="<RECOMMENDED_CGROUP>"
-RECOMMENDED_PORTS="<RECOMMENDED_PORTS>"
-RECOMMENDED_NIC="<RECOMMENDED_NIC>"
-
-case "${1:-}" in
-    check)
-        bash "${SCRIPT_DIR}/hisock_tune.sh" check
-        ;;
-    status)
-        bash "${SCRIPT_DIR}/hisock_tune.sh" status
-        ;;
-    compile)
-        # 编译 hisock 工具与 bpf.o（用户主动执行）
-        bash "${SCRIPT_DIR}/hisock_tune.sh" compile "${KERNEL_SRC}"
-        ;;
-    apply)
-        # 加载 eBPF 加速策略（用户主动执行，需先完成 compile）
-        if [[ -z "${BPF_O}" || -z "${RECOMMENDED_CGROUP}" || -z "${RECOMMENDED_PORTS}" || -z "${RECOMMENDED_NIC}" ]]; then
-            echo "错误: 缺少动态参数（BPF_O/RECOMMENDED_CGROUP/RECOMMENDED_PORTS/RECOMMENDED_NIC）"
-            exit 1
-        fi
-        bash "${SCRIPT_DIR}/hisock_tune.sh" apply "${BPF_O}" "${RECOMMENDED_CGROUP}" "${RECOMMENDED_PORTS}" "${RECOMMENDED_NIC}"
-        ;;
-    unload)
-        # 卸载 eBPF 加速（用户主动执行）
-        bash "${SCRIPT_DIR}/hisock_tune.sh" unload "${RECOMMENDED_CGROUP}" "${RECOMMENDED_NIC}"
-        ;;
-    guide)
-        bash "${SCRIPT_DIR}/hisock_tune.sh" guide
-        ;;
-    *)
-        echo "用法: $0 {check|status|compile|apply|unload|guide}"
-        echo "  check   - 环境检查（CONFIG_HISOCK + 热点 + 编译依赖）"
-        echo "  status  - 状态查询（输出加载前基线）"
-        echo "  compile - 编译 hisock_cmd + bpf.o（用户主动执行）"
-        echo "  apply   - 加载 eBPF 加速（用户主动执行）"
-        echo "  unload  - 卸载 eBPF 加速（用户主动执行）"
-        echo "  guide   - 输出完整操作指南"
-        exit 1
-        ;;
-esac
-```
-
-### 报告中的脚本路径
-
-在中间态调优建议中，调优脚本路径应填写为：
-- `./hisock-tuning/tuning.sh` （相对于调优报告目录）
-
-> **重要提示**：报告中必须明确告知用户"编译与 eBPF 加载操作不属于 agent 自动执行范围，必须由用户在服务器本地手工完成"。
-
----
-
 ## 调优执行流程
 
 ### Phase 1: 调优前提检查
@@ -226,7 +119,7 @@ esac
 | IS_NF_HOOK_HOTSPOT | 搜索 `nf_hook` 关键词 | false |
 | NF_HOOK_FUNCS | 搜索 `nf_hook*` 命中函数列表 | 空 |
 | NF_HOOK_PERCENT | 搜索 "热点占比\|hotspot_percent" 后数值 | 0 |
-| NET_DEV_NAME | 搜索 "NET_DEV_NAME\|网卡设备" 关键词 | 空 |
+| NET_DEV_NAMES | 搜索 "NET_DEV_NAMES\|网卡设备" 关键词 | 空 |
 | CGROUP_PATH | 搜索 "CGROUP_PATH\|cgroup" 关键词 | 空 |
 | LISTEN_PORTS | 搜索 "LISTEN_PORTS\|监听端口" 关键词 | 空 |
 | 适用性评估结论 | 搜索 "hisock" 相关的适用性评估结论 | 不适用 |
@@ -247,7 +140,7 @@ esac
 | NF_HOOK 占比 | 3.5% |
 | 推荐 cgroup | /sys/fs/cgroup/perf_event/docker |
 | 推荐端口 | 6379 |
-| 推荐网卡 | enp46s0f0np0 |
+| 推荐网卡列表 | enp46s0f0np0;enp57s0f0np0 |
 
 ---
 
@@ -264,14 +157,14 @@ esac
 - **影响描述**：总结 netfilter 开销对网络吞吐与延迟的影响
 - **调优手段**：简短描述，如"启用 hisock eBPF 加速绕过 L2/L3 netfilter"
 - **调优步骤**：精简操作步骤，如"1.编译 hisock 工具 2.加载 bpf.o 3.验证热点下降"
-- **调优脚本**：填写 `./hisock-tuning/tuning.sh`（check/compile/apply 等子命令）
+- **调优脚本**：无
 
 #### 2.2 调优建议详情填充
 
 **瓶颈证据**：从分析结果中提取 hisock 相关的指标数据，如：
 - CONFIG_HISOCK=y/m
 - `nf_hook_slow`/`nf_hook_entries` 占比
-- 主要网卡、cgroup、监听端口
+- 推荐网卡列表（提示用户按需选择需要使能的网卡，可多选）、cgroup、监听端口
 
 **影响分析**：说明 netfilter 开销对业务的影响，如：
 - 网络吞吐下降、PPS 受限
@@ -280,33 +173,24 @@ esac
 
 **调优手段**：与瓶颈点列表中的调优手段一致
 
-**调优步骤**：展示**手工操作步骤 + 用户确认执行的脚本命令**：
+**调优步骤**：展示**手工操作步骤**：
 
 ```text
-步骤 0: 环境检查（agent 生成时已验证）
-   bash scripts/hisock_tune.sh check
+步骤 1: 编译hisock_cmd和bpf程序【步骤**必须**完整列出下列步骤，不允许修改任何内容】
+    在arm64环境下，进入内核源码路径：
+    make openeuler_defconfig
+    make -j$(nproc)
+    make headers
+    make -C tools/lib/bpf/ -j$(nproc)
+    make -C samples/bpf
+    cp samples/bpf/hisock/hisock_cmd <指定路径>
+    cp samples/bpf/hisock/bpf.o <指定路径>
 
-步骤 1: 编译 hisock 工具（用户主动执行）
-   # 准备内核源码（与当前运行内核版本一致）
-   # 内核源码路径: ${KERNEL_SRC}
-   bash scripts/hisock_tune.sh compile ${KERNEL_SRC}
-   # 产物路径: ${KERNEL_SRC}/samples/bpf/hisock/{hisock_cmd,bpf.o}
-
-步骤 2: 加载 eBPF 加速策略（用户主动执行）
-   bash scripts/hisock_tune.sh apply ${BPF_O_PATH} ${RECOMMENDED_CGROUP} ${RECOMMENDED_PORTS} ${RECOMMENDED_NIC}
-   # 示例：
-   bash scripts/hisock_tune.sh apply /opt/hisock/bpf.o /sys/fs/cgroup/perf_event/docker/abc123 6379 enp46s0f0np0
-
-步骤 3: 验证热点下降
-   perf record -g -- <业务负载>
-   perf report | grep nf_hook
-   # 期望：nf_hook 占比 < 应用前基线
+步骤 2: 进入指定路径，加载 eBPF 加速策略【网卡设备参**必须**提示用户从推荐网卡列表里选择】
+   ./hisock_cmd -f bpf.o -c <cgroup路径> -p <端口> -i <网卡设备1> -i <网卡设备2>
+   # 示例
+   ./hisock_cmd -f ./bpf.o -c /sys/fs/cgroup/perf_event/docker/ -p 6379 -i enp46s0f0np0 -i enp65s0f0np0
 ```
-
-**调优脚本**：
-- 检查: `./hisock-tuning/tuning.sh check`
-- 编译: `./hisock-tuning/tuning.sh compile <KERNEL_SRC>`（用户执行）
-- 加载: `./hisock-tuning/tuning.sh apply`（用户执行）
 
 **验证方法**：提供验证命令，确认 hisock 生效：
 ```bash
@@ -320,16 +204,8 @@ perf report | grep nf_hook
 
 **回滚方法**：执行卸载命令，停止 eBPF 加速：
 ```bash
-# 方式 A：通过脚本（推荐）
-bash scripts/hisock_tune.sh unload <CGROUP_PATH> <NET_DEV_NAME>
-# 示例：
-bash scripts/hisock_tune.sh unload /sys/fs/cgroup/perf_event/docker/abc123 enp46s0f0np0
-
-# 方式 B：直接调用 hisock_cmd
-<BPF_O_PATH_DIR>/hisock_cmd -u -c <CGROUP_PATH> -i <NET_DEV_NAME>
+./hisock_cmd -u -c <cgroup路径> -i <网卡设备1> -i <网卡设备2>
 ```
-
-> **特别说明**：hisock 的回滚操作可由脚本完成（仅卸载 eBPF，不涉及内核修改），但仍需用户主动执行。
 
 ---
 
@@ -341,16 +217,6 @@ bash scripts/hisock_tune.sh unload /sys/fs/cgroup/perf_event/docker/abc123 enp46
 ${WORK_DIR}/tuning/intermediate/hisock-tuning.md
 ```
 
-同时，在报告目录下创建调优脚本文件夹：
-
-```
-${WORK_DIR}/tuning/hisock-tuning/
-├── tuning.sh              # 动态生成的入口脚本
-└── hisock_tune.sh         # 复制的基础脚本（含 check/compile/apply/unload）
-```
-
-> **⚠️ 职责说明**：上述目录由协调器 `opentunex-scenario-tuning` 在步骤 4 创建，本子技能仅产出中间态建议，不负责脚本部署。
-
 **注意**：本文件是中间态数据，最终将由调优域入口汇总为一份完整的调优建议报告。
 
 ---
@@ -360,10 +226,9 @@ ${WORK_DIR}/tuning/hisock-tuning/
 | 产出项 | 说明 |
 |--------|------|
 | 调优建议报告 | 依据中间态模板生成的结构化报告（含编译 + 加载步骤） |
-| 调优脚本文件夹 | 包含 tuning.sh 入口脚本和 hisock_tune.sh 基础脚本（含 check/compile/apply/unload） |
 | 预期收益 | 网络协议栈开销降低，PPS/吞吐提升 10%-30%（业务相关）；nf_hook 占比下降 |
 | 风险提示 | eBPF 加载/卸载操作由用户执行；agent 不远程操作；需内核 CONFIG_HISOCK 支持 |
-| 回滚方案 | `./hisock-tuning/tuning.sh unload` 或直接调用 `hisock_cmd -u` |
+| 回滚方案 |  `hisock_cmd -u` |
 
 ---
 
@@ -409,7 +274,7 @@ ${WORK_DIR}/tuning/hisock-tuning/
           │
           ▼
 本 skill:
-  解析环境结论 → 前置检查 → 提示编译/加载步骤 → 输出调优报告（用户主动执行 apply/unload）
+  解析环境结论 → 前置检查 → 提示编译/加载步骤 → 输出调优报告
 ```
 
 ---
@@ -421,10 +286,10 @@ ${WORK_DIR}/tuning/hisock-tuning/
 | 调优前提检查结果 | CONFIG_HISOCK=y、nf_hook 热点存在 |
 | 调优步骤建议 | 内核源码编译 hisock_cmd + bpf.o → 加载 eBPF（不通过 agent 自动操作） |
 | 验证方法 | hisock_cmd 进程 + nf_hook 占比下降 + 业务指标改善 |
-| 回滚方案 | `hisock_cmd -u` 或调用脚本 unload |
+| 回滚方案 | `hisock_cmd -u` |
 | 预期收益 | 绕过 L2/L3 netfilter（连接跟踪/丢包策略/端口映射）开销，降低网络协议栈处理延迟 |
 | 风险提示 | eBPF 加载/卸载操作由用户主动执行；agent 不会远程加载 eBPF |
-| 回滚方案 | `./hisock-tuning/tuning.sh unload` 或 `hisock_cmd -u -c <cgroup> -i <nic>` |
+| 回滚方案 | `hisock_cmd -u -c <cgroup> -i <nic>` |
 
 ---
 

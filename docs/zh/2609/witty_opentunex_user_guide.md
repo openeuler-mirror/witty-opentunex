@@ -8,7 +8,11 @@
 
 - **OS 层瓶颈分析**：CPU、内存、IO、网络、调度、锁等多个维度的专项瓶颈识别。
 - **场景化调优**：NUMA 调度、窃取任务、动态 SMT、Docker 算力统筹、分域调度、网卡多路径、拷贝优化、BTB分支目标缓冲、hisock网络加速等。
-- **可执行调优**：基于瓶颈分析结果生成调优脚本与回滚方案，由用户确认后落地。
+- **可执行调优**：基于瓶颈分析结果生成调优步骤（部分调优手段提供可一键执行的调优脚本）与回滚方案，由用户确认后落地。
+
+> [!CAUTION]
+>
+> 本Skill仅负责识别性能瓶颈，并准确给出相应的调优建议。部分调优手段的使能步骤依赖其他组件能力，本Skill仅提供这些组件规定的标准使能步骤；使能过程中如出现问题，不属于本Skill的处理范围，本Skill不负责解决。
 
 ### 整体架构
 
@@ -85,7 +89,7 @@ Agent 侧需安装 OpenCode + LLM api 接入 + 项目 skills。
 
 #### 步骤 1：安装 OpenCode
 
-配置openEuler-26.09的yum源，使用yum命令安装。
+配置openEuler-26.09-DevStation的yum源，使用yum命令安装。
 
 ```sh
 yum install opencode
@@ -99,7 +103,7 @@ OpenCode 需配置 LLM 提供商。详细方法见：<https://opencode.ai/docs/z
 
 #### 步骤 3：安装调优 skills
 
-配置openEuler-26.09的yum源，使用yum命令安装。
+配置openEuler-26.09-DevStation的yum源，使用yum命令安装。
 
 ```sh
 yum install witty-opentunex
