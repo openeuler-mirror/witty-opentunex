@@ -74,12 +74,15 @@ extract_hotspot_info() {
 }
 
 # 从 network_metrics_analysis.txt / net_info.txt 提取网络信息
-# NET_DEV_NAME: 主要网卡设备名（如 enp46s0f0np0）
+# NET_DEV_NAMES: 网卡设备名列表（";"分隔，如 enp46s0f0np0;enp57s0f0np0）
+#   优先从 "=== Process-related Network Interfaces (PID: ...) ===" 段落提取
+#   （由 bottleneck_data_collector.sh 在指定 -p 时写入）；未指定 -p 时回退到
+#   整个文件内匹配 enp/eth/ens/enP 的所有物理网卡名（去重后用 ";" 拼接）。
 # CGROUP_PATH: cgroup 路径（从进程信息推断，如 /sys/fs/cgroup/perf_event/）
 # LISTEN_PORTS: 监听端口号列表（逗号分隔）
 extract_net_info() {
     local data_dir="$1"
-    local net_dev_name=""
+    local net_dev_names=""
     local cgroup_path=""
     local listen_ports=""
 
@@ -94,11 +97,41 @@ extract_net_info() {
     fi
 
     if [[ -n "$nfile" ]]; then
-        # 提取主要物理网卡名（排除 lo/virbr/docker 等虚拟网卡）
-        net_dev_name=$(grep -iE '^\s*(enp|eth|ens|enP)' "$nfile" 2>/dev/null | head -1 | awk '{print $1}' | sed 's/:.*//' || true)
-        if [[ -z "$net_dev_name" ]]; then
-            # 降级：从 ip link 输出提取
-            net_dev_name=$(grep -iE 'link/ether' "$nfile" 2>/dev/null | head -1 | awk '{print $2}' | sed 's/:.*//' || true)
+        # 优先：从 "=== Process-related Network Interfaces (PID: <pid>) ==="
+        # 段落（bottleneck_data_collector.sh 在指定 -p 时写入）提取进程相关网卡
+        local proc_section=""
+        proc_section=$(awk '
+            /^=== Process-related Network Interfaces \(PID:/ {flag=1; next}
+            /^=== /                                                {flag=0}
+            flag
+        ' "$nfile" 2>/dev/null || true)
+        if [[ -n "$proc_section" ]]; then
+            net_dev_names=$(echo "$proc_section" \
+                | grep -iE '^(enp|eth|ens|enP)' \
+                | awk '{print $1}' \
+                | sed 's/:.*//' \
+                | sort -u \
+                | paste -sd';' - \
+                || true)
+        fi
+
+        # 兜底：从整个文件提取所有物理网卡名（排除 lo/virbr/docker 等虚拟网卡），
+        # 去重后用 ";" 拼接，与指定 -p 时的拼接格式保持一致
+        if [[ -z "$net_dev_names" ]]; then
+            net_dev_names=$(grep -iE '^\s*(enp|eth|ens|enP)' "$nfile" 2>/dev/null \
+                | awk '{print $1}' \
+                | sed 's/:.*//' \
+                | sort -u \
+                | paste -sd';' - \
+                || true)
+            if [[ -z "$net_dev_names" ]]; then
+                # 降级：从 ip link 输出提取（单条）
+                net_dev_names=$(grep -iE 'link/ether' "$nfile" 2>/dev/null \
+                    | head -1 \
+                    | awk '{print $2}' \
+                    | sed 's/:.*//' \
+                    || true)
+            fi
         fi
     fi
 
@@ -180,7 +213,7 @@ extract_net_info() {
         done
     fi
 
-    echo "$(json_escape "$net_dev_name") $(json_escape "$cgroup_path") $(json_escape "$listen_ports")"
+    echo "$(json_escape "$net_dev_names") $(json_escape "$cgroup_path") $(json_escape "$listen_ports")"
 }
 
 # 从 static_info.txt / kernel_config_info.txt 提取内核特性支持信息
@@ -242,8 +275,8 @@ main() {
     read -r is_nf_hook_hotspot nf_hook_funcs nf_hook_percent <<< "$(extract_hotspot_info "$DATA_DIR")"
 
     # ---- 从 network_metrics_analysis.txt 提取网络信息 ----
-    local net_dev_name cgroup_path listen_ports
-    read -r net_dev_name cgroup_path listen_ports <<< "$(extract_net_info "$DATA_DIR")"
+    local net_dev_names cgroup_path listen_ports
+    read -r net_dev_names cgroup_path listen_ports <<< "$(extract_net_info "$DATA_DIR")"
 
     # ---- 从 kernel_config_info.txt 提取内核特性支持 ----
     local is_hisock_supported=false kernel_version="unknown"
@@ -255,7 +288,7 @@ main() {
   "is_nf_hook_hotspot": ${is_nf_hook_hotspot},
   "nf_hook_funcs": "$(json_escape "${nf_hook_funcs:-}")",
   "nf_hook_percent": ${nf_hook_percent:-0},
-  "net_dev_name": "$(json_escape "$net_dev_name")",
+  "net_dev_names": "$(json_escape "$net_dev_names")",
   "cgroup_path": "$(json_escape "$cgroup_path")",
   "listen_ports": "$(json_escape "$listen_ports")",
   "is_hisock_supported": ${is_hisock_supported},
