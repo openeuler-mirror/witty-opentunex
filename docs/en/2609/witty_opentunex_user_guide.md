@@ -8,7 +8,11 @@
 
 - **OS-level Bottleneck Analysis**: Specialized bottleneck identification across multiple dimensions including CPU, memory, IO, network, scheduling, and locks.
 - **Scenario-based Tuning**: NUMA scheduling, task stealing, dynamic SMT, Docker compute coordination, domain-divided scheduling, NIC multi-path, copy optimization, BTB (Branch Target Buffer), hisock network acceleration, and more.
-- **Executable Tuning**: Generates tuning scripts and rollback plans based on bottleneck analysis results, applied after user confirmation.
+- **Executable Tuning**: Generates tuning steps (some tuning methods provide one-click executable tuning scripts) and rollback plans based on bottleneck analysis results, applied after user confirmation.
+
+> [!CAUTION]
+>
+> This Skill is only responsible for identifying performance bottlenecks and providing accurate tuning recommendations. The enabling steps for some tuning methods depend on the capabilities of other components; this Skill only provides the standard enabling steps defined by those components. Any issues that arise during the enabling process are outside the scope of this Skill and are not its responsibility to resolve.
 
 ### Overall Architecture
 
@@ -85,7 +89,7 @@ The Agent side needs to install OpenCode + LLM API access + project skills.
 
 #### Step 1: Install OpenCode
 
-Configure the yum source for openEuler-26.09, then install with yum.
+Configure the yum source for openEuler-26.09-DevStation, then install with yum.
 
 ```sh
 yum install opencode
@@ -99,7 +103,7 @@ The tuning skills recommend using models with capability of **GLM-4.7** or **Min
 
 #### Step 3: Install the Tuning Skills
 
-Configure the yum source for openEuler-26.09, then install with yum.
+Configure the yum source for openEuler-26.09-DevStation, then install with yum.
 
 ```sh
 yum install witty-opentunex

@@ -74,7 +74,7 @@ description: "hisock 网络加速适用性分析。检查热点函数调用栈�
 | `is_nf_hook_hotspot` | IS_NF_HOOK_HOTSPOT | `true` / `false`（调用栈中包含 nf_hook* 函数） |
 | `nf_hook_funcs` | NF_HOOK_FUNCS | 命中的函数名列表，如 `"nf_hook_slow,nf_hook_entries"` |
 | `nf_hook_percent` | NF_HOOK_PERCENT | 热点占比数值（如 `3.5` 表示 3.5%） |
-| `net_dev_name` | NET_DEV_NAME | 主要物理网卡名，如 `"enp46s0f0np0"` |
+| `net_dev_names` | NET_DEV_NAMES | 和目标进程相关的物理网卡名，多个网卡用";"拼接，如 `"enp46s0f0np0;enp57s0f0np0"` |
 | `cgroup_path` | CGROUP_PATH | cgroup 路径，如 `"/sys/fs/cgroup/perf_event"` |
 | `listen_ports` | LISTEN_PORTS | 关联的服务端口信息 |
 | `is_hisock_supported` | IS_HISOCK_SUPPORTED | `true` / `false`（内核配置 CONFIG_HISOCK=y） |
@@ -147,8 +147,11 @@ description: "hisock 网络加速适用性分析。检查热点函数调用栈�
 1. 编译 hisock 工具:
    ```bash
    # 进入内核源码路径
+   make openeuler_defconfig
+   make -j$(nproc)
+   make headers
    make -C tools/lib/bpf/ -j$(nproc)
-   make -C samples/bpf -j$(nproc)
+   make -C samples/bpf
    cp samples/bpf/hisock/hisock_cmd <指定路径>
    cp samples/bpf/hisock/bpf.o <指定路径>
    ```
@@ -210,7 +213,7 @@ perf record -g -- <your_workload> && perf report | grep nf_hook
 
 | 指标 | 值 |
 |------|-----|
-| NET_DEV_NAME | {主要网卡名，如 "enp46s0f0np0"} |
+| NET_DEV_NAMES | 和目标进程相关的物理网卡名，多个网卡用";"拼接，如 `"enp46s0f0np0;enp57s0f0np0"` |
 | CGROUP_PATH | {cgroup 路径} |
 | LISTEN_PORTS | {关联服务端口} |
 
@@ -227,8 +230,11 @@ perf record -g -- <your_workload> && perf report | grep nf_hook
 1. 编译 hisock 工具:
    ```bash
    # 进入内核源码路径
+   make openeuler_defconfig
+   make -j$(nproc)
+   make headers
    make -C tools/lib/bpf/ -j$(nproc)
-   make -C samples/bpf -j$(nproc)
+   make -C samples/bpf
    cp samples/bpf/hisock/hisock_cmd <指定路径>
    cp samples/bpf/hisock/bpf.o <指定路径>
    ```

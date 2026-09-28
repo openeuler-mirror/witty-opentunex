@@ -14,7 +14,7 @@ description: "copy_from_user 内核补丁调优建议。基于瓶颈分析结果
 | Hisilicon 优化 CPU（LINXICORE9100、HIP11、HIP12） | `partID >= 0xd02`（>=3330） | 大拷贝（≥4KB）切换到 `ldp` 双字加载指令 |
 | 支持 FEAT_LSUI 的 ARMv8.9 CPU | — | 直接使用 `ldtp` 非特权双字加载，size 不受限 |
 
-> **⚠️ 本调优方向不支持一键使能——需手工下载并应用内核补丁、修改编译配置、重编内核并重启。Agent 仅生成调优指导报告与检查脚本，不自动执行内核修改或重启。**
+> **⚠️ 本调优方向不支持一键使能——需手工下载并应用内核补丁、修改编译配置、重编内核并重启。Agent 仅生成调优指导报告，不自动执行内核修改或重启。**
 
 ## 强制约束
 
@@ -41,8 +41,8 @@ RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "__arch
 - 输入契约携带 `execution_context`（`execution_mode` / `user` / `ip`）。**远端模式**（execution_mode=remote）：`${WORK_DIR}` 是**远端服务器上**的路径：
   - 读取融合报告/分析结果：经 ssh 在远端读取（`ssh -q ${user}@${ip} "grep/cat <远端文件>"`），**禁止** scp 拷回本地；下方 `find ${WORK_DIR}/analysis/ ...` 等命令在远端模式下必须写为 `ssh ${user}@${ip} "find ${WORK_DIR}/analysis/ -name result.md ..."` 形式
   - 写入中间态建议/契约到 `${WORK_DIR}/tuning/...`：先在 agent 本地用 Write 工具生成文件，再 scp 上传到远端路径；**禁止**在 agent 本地创建 `${WORK_DIR}` 目录
-  - **本技能不创建脚本目录**：本技能仅产出中间态建议（`${WORK_DIR}/tuning/intermediate/copy-user-tuning.md`）与输出契约；调优脚本目录 `${WORK_DIR}/tuning/copy-user-tuning/` 由协调器 `opentunex-scenario-tuning` 在步骤 4 统一创建（从本技能 `scripts/` 复制基础脚本 + 生成 `tuning.sh`）。本技能**不再**负责脚本部署与入口脚本生成
-  - 本技能**不执行** 内核补丁应用 / 编译配置修改 / 内核重编 / 系统重启（遵守 T-01/T-02/T-04）：`bash scripts/copy_user_tune.sh check` 仅检查 CPU/内核/热点环境；补丁应用、内核编译、配置修改、服务器重启由**用户在远端服务器上手工完成**；agent 不通过 ssh 代执行
+  - **本技能不创建脚本目录**：本技能仅产出中间态建议（`${WORK_DIR}/tuning/intermediate/copy-user-tuning.md`）与输出契约
+  - 本技能**不执行** 内核补丁应用 / 编译配置修改 / 内核重编 / 系统重启（遵守 T-01/T-02/T-04）
 - **本地模式**（execution_mode=local）：`${WORK_DIR}` 为 agent 本地目录，脚本部署与文件操作为本地操作。
 - 具体写法见 `opentunex-remote-execution/references/work_dir_remote_semantics.md`。
 
@@ -96,94 +96,6 @@ RESULT_FILE=$(find ${WORK_DIR}/analysis/ -name "result.md" -exec grep -l "__arch
 | 业务性能 | 业务监控 QPS / 延迟 | 拷贝密集场景 QPS 提升、延迟下降 |
 
 > **说明**：最终确认以业务表现和 `ldp`/`ldtp` 指令出现为准；config 项出现仅表示编译选项启用，不保证运行时实际生效（需运行时分支命中）。
-
----
-
-## 技能调用方法
-
-### 基础脚本调用
-
-本技能依赖 `scripts/copy_user_tune.sh` 脚本完成**环境检查与提示输出**（不做实际修改）。脚本支持以下操作：
-
-| 操作 | 命令 | 说明 |
-|------|------|------|
-| 环境检查 | `bash scripts/copy_user_tune.sh check` | 验证 CPU 架构、partID、内核选项、热点函数 |
-| 状态查询 | `bash scripts/copy_user_tune.sh status` | 输出当前 CPU/内核/补丁状态，作为补丁应用前后对比基线 |
-| 补丁与编译指南 | `bash scripts/copy_user_tune.sh guide` | 输出应用补丁 + 修改编译选项 + 重编内核的完整步骤 |
-| 验证检查 | `bash scripts/copy_user_tune.sh verify` | 重启后运行，输出内核选项验证 + 业务表现验证建议 |
-
-> **⚠️ 说明**：所有脚本操作仅涉及 `lscpu`/`uname`/`grep`/`cat`/`dmesg` 等只读命令，不修改任何系统状态。内核补丁应用与重编必须由用户在服务器本地手工完成；agent 不尝试远程修改内核源码或触发内核重编。
-
----
-
-## tuning.sh 动态生成说明（参考：协调器执行）
-
-> **⚠️ 职责说明**：本节为协调器 `opentunex-scenario-tuning` 生成入口脚本时使用的参考模板。**本子技能不执行此步骤**——脚本目录与 `tuning.sh` 由协调器统一创建（见协调器 SKILL.md 步骤 4）。本节保留是为了让子技能输出契约中的 `output.summary` 字段能准确说明脚本模板与基础脚本名，方便协调器引用。
-
-### 入口脚本目录结构
-
-协调器会按以下结构创建脚本目录：
-
-```
-${WORK_DIR}/tuning/copy-user-tuning/
-├── tuning.sh              # 入口脚本（动态生成）
-└── copy_user_tune.sh      # 基础脚本（从本技能 scripts/ 复制，只读检查工具）
-```
-
-### tuning.sh 模板
-
-入口脚本由大模型根据瓶颈分析结果动态生成，模板如下：
-
-```bash
-#!/bin/bash
-# copy_from_user 优化调优入口脚本
-# 由调优技能根据瓶颈分析动态生成
-# 注意：本技能不修改系统状态，内核补丁应用与重编必须由人工完成
-
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# 动态参数（由大模型根据瓶颈分析结果填充）
-# CPU_MODEL_DESC: CPU 型号描述，如 "Kunpeng 920 (partID=0xd02)"
-# PATCH_URL: 内核补丁地址，默认 PR #22481
-# HOTSPOT_FUNCS: 命中的拷贝函数列表，如 "__arch_copy_from_user,__arch_copy_to_user"
-# HOTSPOT_PERCENT: 热点占比
-CPU_MODEL_DESC="<CPU_MODEL_DESC>"
-PATCH_URL="<PATCH_URL>"
-HOTSPOT_FUNCS="<HOTSPOT_FUNCS>"
-HOTSPOT_PERCENT="<HOTSPOT_PERCENT>"
-
-case "${1:-}" in
-    check)
-        bash "${SCRIPT_DIR}/copy_user_tune.sh" check
-        ;;
-    status)
-        bash "${SCRIPT_DIR}/copy_user_tune.sh" status
-        ;;
-    guide)
-        bash "${SCRIPT_DIR}/copy_user_tune.sh" guide
-        ;;
-    verify)
-        bash "${SCRIPT_DIR}/copy_user_tune.sh" verify
-        ;;
-    *)
-        echo "用法: $0 {check|status|guide|verify}"
-        echo "  check  - 环境检查（CPU架构 + partID + 内核选项 + 热点）"
-        echo "  status - 状态查询（输出补丁应用前基线）"
-        echo "  guide  - 输出补丁应用 + 重编内核操作指南"
-        echo "  verify - 重启后验证（输出内核选项验证 + 业务表现建议）"
-        exit 1
-        ;;
-esac
-```
-
-### 报告中的脚本路径
-
-在中间态调优建议中，调优脚本路径应填写为：
-- `./copy-user-tuning/tuning.sh` （相对于调优报告目录）
-
-> **重要提示**：报告中必须明确告知用户"内核补丁应用与重编不属于脚本执行范围，需由用户在服务器本地手工完成"。
 
 ---
 
@@ -242,7 +154,7 @@ esac
 - **影响描述**：总结 `__arch_copy` 在大块拷贝场景下的指令发射密度与带宽利用率
 - **调优手段**：简短描述，如"应用内核补丁 PR #22481 启用 ldp/ldtp 双字加载"
 - **调优步骤**：精简操作步骤，如"1.下载补丁 2.设置 CONFIG_ARM64_COPY_FROM_USER_OPT=y 3.重编内核 4.重启"
-- **调优脚本**：填写 `./copy-user-tuning/tuning.sh`（仅 check/guide/verify，不修改内核）
+- **调优脚本**：无
 
 #### 2.2 调优建议详情填充
 
@@ -262,36 +174,24 @@ esac
 **调优步骤**：展示**手工操作步骤**（不能使用 shell 命令自动化内核重编），让用户了解具体操作：
 
 ```text
-1. 拉取 openEuler 内核源码（或在已有内核源码目录下）
-   git clone https://gitee.com/openeuler/kernel.git
-   cd kernel
-   git checkout <目标内核版本分支>
-
+1. 进入 openEuler 内核源码目录
 2. 应用 PR #22481 补丁
-   curl -L https://atomgit.com/openeuler/kernel/pull/22481.patch -o /tmp/22481.patch
-   git am /tmp/22481.patch
-   # 若 patch 已合入主干可跳过此步
-
+   补丁链接地址：https://atomgit.com/openeuler/kernel/pull/22481.patch
+   若 patch 已合入主干可跳过此步
 3. 设置内核编译选项
    # 方法 A：编辑 .config 直接追加
    echo "CONFIG_ARM64_COPY_FROM_USER_OPT=y" >> .config
    # 方法 B：通过 menuconfig 勾选
    make menuconfig
-   # 路径: Kernel Features → Enable ARM64 copy from user optimization
-
+   # 路径: Kernel Features -> Turbo features selection -> Hisilicon Optimized Copy From User enabled
 4. 编译并安装内核
    make -j$(nproc)          # 编译
    make modules_install     # 安装内核模块
    make install             # 安装内核到 /boot 并更新 grub
    # 或使用 rpm 包构建：make rpm-pkg
-
 5. 重启系统加载新内核
    reboot
-
-6. 重启后回到新内核，运行 ./copy-user-tuning/tuning.sh verify 验证
 ```
-
-**调优脚本**：填写 `./copy-user-tuning/tuning.sh guide`（仅输出补丁应用与重编指南，不修改内核）
 
 **验证方法**：提供重启后的验证命令，确认补丁/选项生效：
 ```bash
@@ -309,8 +209,6 @@ perf script | grep -E '__arch_copy_(to|from)_user' | grep -E 'ldp|ldtp'
 2. 或在旧内核环境下，重新编译不含 PR #22481 / CONFIG_ARM64_COPY_FROM_USER_OPT 的内核并安装
 ```
 
-> **特别说明**：本调优的回滚操作主要依赖 grub 启动菜单选择旧内核；`tuning.sh` 脚本不提供内核回滚能力。
-
 ---
 
 ### Phase 3: 报告输出
@@ -321,16 +219,6 @@ perf script | grep -E '__arch_copy_(to|from)_user' | grep -E 'ldp|ldtp'
 ${WORK_DIR}/tuning/intermediate/copy-user-tuning.md
 ```
 
-同时，在报告目录下创建调优脚本文件夹：
-
-```
-${WORK_DIR}/tuning/copy-user-tuning/
-├── tuning.sh              # 动态生成的入口脚本
-└── copy_user_tune.sh      # 复制的基础脚本（只读检查工具）
-```
-
-> **⚠️ 职责说明**：上述目录由协调器 `opentunex-scenario-tuning` 在步骤 4 创建，本子技能仅产出中间态建议，不负责脚本部署。
-
 **注意**：本文件是中间态数据，最终将由调优域入口汇总为一份完整的调优建议报告。
 
 ---
@@ -340,7 +228,6 @@ ${WORK_DIR}/tuning/copy-user-tuning/
 | 产出项 | 说明 |
 |--------|------|
 | 调优建议报告 | 依据中间态模板生成的结构化报告（含内核补丁应用与重编手工步骤） |
-| 调优脚本文件夹 | 包含 tuning.sh 入口脚本和 copy_user_tune.sh 基础脚本（仅只读检查） |
 | 补丁工单 | 报告中的"调优步骤"节包含完整的补丁地址与重编步骤，可直接交给内核维护工程师 |
 | 预期收益 | `__arch_copy` 函数在 ≥4KB 拷贝场景下指令发射密度下降，内存带宽利用率提升，业务 QPS 提升 5%-20%（业务相关） |
 | 风险提示 | 需重编内核与重启；补丁应用与重编不可由 agent 代为执行 |

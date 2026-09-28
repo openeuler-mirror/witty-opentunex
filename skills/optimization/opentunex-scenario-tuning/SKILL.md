@@ -185,7 +185,13 @@ ls ${WORK_DIR}/tuning/
 
 ### 步骤 4：生成调优脚本【强制】
 
-> **⛔ 步骤 4 是强制步骤，不可跳过。** 任何"primary_plan"或"extended_plan"适用方向都必须生成调优脚本目录（包含 `tuning.sh` 入口脚本和从子技能复制的**基础脚本**）。**`sub_skills_skipped` / `not_applicable` 方向不得生成脚本**。
+> **⛔ 步骤 4 是强制步骤，不可跳过。** 任何"primary_plan"或"extended_plan"适用方向都必须生成调优脚本目录（包含 `tuning.sh` 入口脚本和从子技能复制的**基础脚本**）——除非该方向命中下方"脚本生成禁止清单"。**`sub_skills_skipped` / `not_applicable` 方向不得生成脚本**。
+> 
+> **⛔ 脚本生成禁止清单**（优先级高于 `plan` 字段）：以下调优方向即使 plan 为 `primary_plan` / `extended_plan`，也**不得生成脚本**——这些方向涉及内核编译 / 补丁应用 / eBPF 加载等无法标准化为 check/apply/rollback 的手工操作：
+> - `opentunex-copy-user-tuning`
+> - `opentunex-hisock-tuning`
+>
+> **判定规则**：禁止清单优先级高于 plan 字段。命中禁止清单的方向在 tuning-report.md "调优脚本"列中填写 `无（手工操作，参见中间态建议）`，不生成脚本目录、不复制基础脚本、不生成 `tuning.sh`。
 >
 > **职责归属**：本步骤由 `opentunex-scenario-tuning` 协调器统一负责。子技能不再负责创建脚本目录——子技能只输出中间态建议与输出契约，不写脚本。**子技能输出契约中"未生成调优脚本目录"属于正常设计**，不是异常。
 
@@ -268,7 +274,16 @@ esac
 
 > **远端模式**：脚本目录是远端 `${WORK_DIR}/tuning/<调优技能名称>/`——先在 agent 本地用 Write 工具生成 `tuning.sh`，与对应子技能 `opentunex-<调优技能名称>/scripts/` 下的基础脚本一并 `scp` 上传到远端路径，并在远端 `chmod +x`；**禁止**在 agent 本地创建 `${WORK_DIR}/tuning/...` 目录树。脚本不自动执行，由用户在远端服务器上运行（遵守 T-01/T-02）。
 
-1. **遍历适用方向**：读取各子技能输出契约的 `output.summary.plan` 字段，筛选出 `primary_plan` 和 `extended_plan` 的调优方向作为脚本生成清单。`sub_skills_skipped` 列表中的方向不生成脚本
+1. **遍历适用方向并两道过滤**：读取各子技能输出契约的 `output.summary.plan` 字段，按下述两道过滤生成最终脚本清单：
+   - **第一道·适用性过滤**：保留 `plan ∈ {primary_plan, extended_plan}` 的方向；`sub_skills_skipped` / `not_applicable` 方向直接移出清单
+   - **第二道·脚本生成禁用过滤**：以下子技能即使 plan 为 primary_plan / extended_plan，也**强制移出清单**（禁止清单优先级高于 plan 字段）：
+     ```yaml
+     no_script_skills:
+       - opentunex-copy-user-tuning   # 内核补丁 + 重编 + 重启，无标准 check/apply/rollback 路径
+       - opentunex-hisock-tuning      # samples/bpf/hisock 编译 + eBPF 加载，agent 不执行
+     ```
+   - **最终清单** = 第一道过滤后剩余的方向 − 第二道禁止集合
+   - 命中第二道过滤的方向：在 `tuning-report.md` 的"调优脚本"列填写 `无（手工操作，参见中间态建议）`；不创建子目录、不复制基础脚本、不生成 `tuning.sh`
 2. **建立脚本源映射**：对每个适用方向，记录其对应的子技能名称、入口脚本名（`<skill-name>/`）、基础脚本名（从子技能 `scripts/` 目录枚举）
 3. **创建子目录**：按调优技能名称在报告目录下创建子目录（远端模式经 ssh：`ssh ${user}@${ip} "mkdir -p ${WORK_DIR}/tuning/<调优技能名称>"`）
 4. **复制基础脚本**：从对应子技能 `opentunex-<调优技能名称>/scripts/` 目录复制基础脚本到子目录（远端模式：`scp opentunex-<调优技能名称>/scripts/<基础脚本> ${user}@${ip}:${WORK_DIR}/tuning/<调优技能名称>/`）
@@ -277,7 +292,7 @@ esac
 
 #### 步骤 4 完成校验【不可跳过】
 
-完成脚本生成后，必须对每个适用方向做以下校验：
+完成脚本生成后，必须对**实际生成了脚本**的每个适用方向做以下校验（命中禁止清单的方向不参与 S-1 / S-2 / S-3 / S-4 校验，但必须通过 S-5 反向校验）：
 
 | # | 校验项 | 通过条件 |
 |---|--------|---------|
@@ -285,8 +300,9 @@ esac
 | S-2 | 入口脚本存在 | `${WORK_DIR}/tuning/<调优技能名称>/tuning.sh` 文件存在且可执行 |
 | S-3 | 基础脚本存在 | `${WORK_DIR}/tuning/<调优技能名称>/<基础脚本>` 文件存在 |
 | S-4 | 脚本路径一致 | `tuning-report.md` 中"调优脚本"列的相对路径（如 `./btb-tuning/tuning.sh`）能在目录下找到对应文件 |
+| S-5 | **禁止清单未越界** | `${WORK_DIR}/tuning/` 下**不得**存在 `copy-user-tuning/` 或 `hisock-tuning/` 子目录，也不得包含这两个方向的 `tuning.sh` 或基础脚本 |
 
-**校验失败处理**：任一适用方向的 S-1 / S-2 / S-3 不通过，必须修复后重新校验；不得进入步骤 5。
+**校验失败处理**：任一适用方向的 S-1 / S-2 / S-3 不通过，或 S-5 命中（说明协调器违反硬编码清单生成了被禁方向的脚本），必须修复后重新校验；不得进入步骤 5。
 
 ### 步骤 5：输出调优建议报告
 
@@ -320,14 +336,8 @@ ${WORK_DIR}/tuning/
 │   ├── tuning.sh
 │   └── docker_coordination_burst.sh
 ├── btb-tuning/                               # BIOS 手工操作（无系统修改）
-│   ├── tuning.sh
-│   └── btb_tune.sh                          # 只读检查工具
-├── copy-user-tuning/                         # 内核补丁应用 + 重编（无系统修改）
-│   ├── tuning.sh
-│   └── copy_user_tune.sh                    # 只读检查工具
-└── hisock-tuning/                            # 编译 + eBPF 加载
     ├── tuning.sh
-    └── hisock_tune.sh                       # 含 compile/apply/unload（用户主动执行）
+    └── btb_tune.sh                          # 只读检查工具
 ```
 
 ## 调优建议报告模板
